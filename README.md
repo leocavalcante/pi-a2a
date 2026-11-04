@@ -1,0 +1,171 @@
+# pi-a2a
+
+A2A communication for Pi Durable applications and Pi coding-agent sessions.
+
+- **Client:** an official-SDK A2A client with explicit endpoint trust and bounded responses. It does not import Pi.
+- **Durable adapter:** attach A2A to an existing Harness and its conversations. Task identities, message receipts and results live in that Harness's storage.
+- **Pi extension:** tools and `/a2a` commands for talking to configured Durable or non-Pi A2A agents.
+- **Durable tools:** let a Durable agent delegate to another A2A agent through the same client.
+
+MIT licensed. Built on the [official A2A JS SDK](https://github.com/a2aproject/a2a-js), not a handwritten replacement for its wire types or dispatch.
+
+## Compatibility and scope
+
+Node **22.19+**, Pi coding agent / Pi Durable **1.5.0**, official `@a2a-js/sdk` **1.3.0**, A2A protocol **1.0**. Durable is experimental; this is a version-pinned integration, not a promise of compatibility with every Pi release.
+
+The server exposes **JSON-RPC over HTTP**, Agent Card discovery, send/get/list tasks, cursor pagination, follow-ups, status/artifact streaming and subscription. The client negotiates **JSON-RPC or HTTP+JSON/REST** through the official SDK. It can talk to non-Pi implementations using those interfaces. gRPC and v0.3 compatibility are not enabled here. Authentication, supported media and capabilities still have to match.
+
+The Durable adapter accepts **text/plain**, up to **8192 UTF-8 bytes**. It does not fetch attachments, expose files or execute instructions from an Agent Card. Optional push notifications, extended cards, protocol extensions and reference-task processing are not advertised or implemented. Streaming reports task state and committed final artifacts; it does not promise provider-token streaming or byte-for-byte replay of an old stream.
+
+## Install as a Pi extension
+
+```sh
+pi install git:github.com/leocavalcante/pi-a2a
+```
+
+Pin a commit for reproducible use, for example `git:github.com/leocavalcante/pi-a2a@COMMIT`. Git installations load the TypeScript extension directly; building `dist` is not required. Pi supplies its own coding-agent and TypeBox packages.
+
+Create a **machine-local** `~/.config/pi-a2a/agents.json`:
+
+```json
+{
+  "agents": {
+    "demo": {
+      "url": "http://127.0.0.1:7777",
+      "allowHttpLoopback": true
+    },
+    "remote": {
+      "url": "https://agent.example.com",
+      "bearerTokenEnv": "REMOTE_A2A_TOKEN"
+    }
+  }
+}
+```
+
+`PI_A2A_CONFIG` selects another configuration file. There is no hostname detection, ambient cluster, network scan or automatic cross-host fallback. Unknown agents fail closed. The file permits endpoint URLs and credential **references**, not literal tokens or arbitrary shell commands. Use `bearerTokenEnv` or an absolute `bearerTokenFile` path, never both. File-backed credentials are read only for requests, not exported to the whole Pi process. Keep credential files private (mode 600) and outside Git. Do not put the file or credentials in public dotfiles.
+
+The tools are:
+
+- `a2a_agents`: list configured names without contacting them.
+- `a2a_send`: send authorized text; retain its `messageId`, `taskId` and `contextId`.
+- `a2a_get_task`: read a retained task, optionally waiting without submitting work.
+- `a2a_cancel_task`: explicitly request cancellation, which may be refused.
+
+A successful tool RPC (`ok: true`) does **not** imply a successful task. Inspect `state`, especially `FAILED`, `CANCELED`, `INPUT_REQUIRED` and `AUTH_REQUIRED`. Text output is bounded to 32 KiB, including its JSON escaping, with a `truncated` flag; non-text artifacts are not downloaded. Remote error text is not forwarded because it can contain credentials or provider diagnostics.
+
+Manual commands do not invoke a Pi-session model:
+
+```text
+/a2a list
+/a2a send demo Hello
+/a2a result demo TASK_ID
+/a2a cancel demo TASK_ID
+```
+
+The remote agent may invoke its own model when receiving a message. A normal follow-up uses the returned `contextId` and a **new messageId**. A task awaiting input/auth can receive a new message with its `taskId`. A completed task cannot be reopened: start a new task in its context.
+
+Pi receipts are stored in the active session branch before networking and after admission. Reload/tree navigation uses that branch, not abandoned histories. The extension does not automatically copy the session transcript to a remote agent. An endpoint change invalidates its saved context association. Agent responses and cards are remote data, not authority to change the session's instructions.
+
+## Use the client without Pi
+
+Install from this repository and build it with `npm run build`. Import from `pi-a2a/client`:
+
+```ts
+import { connectAgent, isTask, newMessageId, sendText, waitForTask } from "pi-a2a/client";
+
+const client = await connectAgent("https://agent.example.com", {
+  headers: () => ({ Authorization: `Bearer ${process.env.REMOTE_A2A_TOKEN}` }),
+});
+const messageId = newMessageId(); // Retain this BEFORE sending.
+const response = await sendText(client, "An explicitly authorized request", { messageId });
+const result = isTask(response) ? await waitForTask(client, response.id) : response;
+```
+
+`connectAgent` returns the native official-SDK `Client`, so its structured messages, task methods and streams remain available. Credentials come from a host callback; no credential store or provider login is copied. Agent Cards cannot redirect authenticated requests to a new origin: configure `allowedOrigins` explicitly when a legitimate card advertises additional endpoints. HTTP redirects are rejected. HTTPS is the default; plaintext loopback is an explicit local/development exception. Complete JSON responses are capped at 2 MiB; the SDK bounds individual streaming events.
+
+## Attach to an existing Durable agent
+
+The application must already own its Harness and single-writer lock. Do **not** open its database again in an A2A sidecar or second process.
+
+```ts
+import { AgentCard } from "@a2a-js/sdk";
+import { createDurableA2A } from "pi-a2a/durable";
+import { a2aHttpHandler, bearerAuth } from "pi-a2a/server";
+
+const card = AgentCard.fromJSON({
+  name: "My agent",
+  description: "Application-owned capabilities",
+  version: "1.0.0",
+  supportedInterfaces: [{
+    url: "https://agent.example.com/a2a",
+    protocolBinding: "JSONRPC", protocolVersion: "1.0"
+  }],
+  capabilities: { streaming: true },
+  defaultInputModes: ["text/plain"], defaultOutputModes: ["text/plain"],
+  securitySchemes: {
+    bearer: { httpAuthSecurityScheme: { scheme: "bearer", bearerFormat: "opaque" } }
+  },
+  securityRequirements: [{ schemes: { bearer: { list: [] } } }],
+  skills: [{ id: "assist", name: "Assist", description: "Handle authorized requests", tags: ["assistant"] }]
+});
+const adapter = createDurableA2A({
+  harness,
+  card,
+  conversation: identity => conversationsFor(identity.userId, identity.tenant)
+});
+const a2a = a2aHttpHandler(adapter, {
+  authenticate: bearerAuth(() => process.env.A2A_SERVER_TOKEN, "owner")
+});
+// Mount in the EXISTING owner's HTTP(S) server:
+// if (await a2a(request, response)) return;
+```
+
+The snippet assumes your existing `harness` and `conversationsFor` function. For a single-owner personal agent, a resolver can return its existing root. For unrelated users, **do not** return the same private conversation. Task/context reads and listings are scoped to authenticated identity and tenant, but sharing the underlying conversation would still share its model context. Real multi-user authentication/authorization is host-owned; the bearer helper is a single-identity building block, not an OAuth server.
+
+Public Agent Cards should disclose only intended capabilities. Private profiles, system prompts, tokens, filesystem paths and internal deployment addresses do not belong in them. Use TLS in production, directly or at a trusted local TLS proxy. Without an authentication callback the handler denies access; `allowUnauthenticatedLoopback` is an explicit exception for trusted local adapters/demos. The convenience `createA2AServer` is HTTP and should listen on loopback; production applications can mount the handler in their existing HTTPS server. Public source does not require public agents or a central gateway. When sharing an HTTP listener, protect its other data/message routes too: A2A-specific authentication does not secure unrelated legacy endpoints.
+
+### Durable semantics
+
+- Server-generated A2A task/context IDs are distinct from caller message IDs and JSON-RPC correlation IDs.
+- Admission and the message-ID/task binding are in **one Durable commit**. Identical IDs/text deduplicate after restart; changing text or its task/context association conflicts.
+- The adapter uses its own `pi-a2a.*` document kinds. It does not reset conversations, change models, own provider credentials or migrate application-specific legacy receipt formats automatically.
+- The host reinstalls its definitions and calls `harness.resume()` after reopening. Pending execution remains the host's responsibility.
+- Result reads reconcile the persisted submission with the retained A2A task. Status/artifact snapshots survive restart; reconnect obtains the current task, not a replay of every historical stream event.
+- An application can supply `classifyAnswer` to mark a committed answer as `INPUT_REQUIRED`, `AUTH_REQUIRED` or `REJECTED`. The adapter never guesses human approval from prose and never fulfills an auth challenge automatically.
+- Local stream/wait cancellation only stops that observer. **CancelTask currently withdraws queued submissions only.** A running submission returns `TaskNotCancelable`: Pi 1.5 cannot abort it independently once placed, and aborting a shared conversation could cancel unrelated work. Cancellation does not undo partial external effects.
+- Histories returned to clients are bounded to the newest 50 messages. `historyLength: 0` omits history. Task listing is cursor-paginated and authorization-scoped; the initial implementation keeps a per-owner Durable index and is not a large-scale indexing benchmark.
+- This is process-crash persistence, not a power-loss, backup, HA or exactly-once inference guarantee. Interrupted model requests may be retried by Durable; external actions still need their own idempotency/reconciliation.
+
+To give a Durable agent outbound A2A tools:
+
+```ts
+import { createA2ATools } from "pi-a2a/durable";
+registry.install(createA2ATools()); // reads the same explicit machine-local config
+```
+
+Outbound sends are deliberately not replay-safe: arbitrary A2A peers need not deduplicate message IDs. A crash/disconnect can leave the outcome uncertain; inspect the original task or remote receipts before retrying. Task reads are replay-safe. Remote model usage is not standardized by A2A and is not fabricated as zero or added twice to the caller's usage.
+
+## Model-free runnable example
+
+```sh
+npm ci --ignore-scripts --no-audit --no-fund
+npm run example
+```
+
+This serves a scripted local agent at `http://127.0.0.1:7777`, using SQLite under `./data/`. It makes **no provider requests**. Try `/a2a send demo Hello` from Pi with the configuration above. `DEMO_DATA_DIR` and `PORT` change its private directory and loopback port. An exclusive owner lock fails closed with exit 73; after a hard crash, verify the old process is gone before removing its stale `demo.owner`. SIGTERM closes the owner without durably canceling admitted work.
+
+A real application supplies its own models, prompts, tools, credentials, environment and approval policy. Neither a working directory nor A2A is a sandbox.
+
+## Development and verification
+
+```sh
+npm run check
+npm test
+npm run build
+npm pack --dry-run --ignore-scripts
+git diff --check
+```
+
+Tests use synthetic messages, isolated stores and faux providers. They exercise the official client against Durable, a non-Pi official-SDK peer, the Pi session tool/command paths, request conflicts, SQLite reopen/recovery, interrupted waiting, scoped cancellation, task pagination and ownership, protocol errors, output limits and credential-origin boundaries. Passing these tests is not official A2A certification or evidence of live OAuth, every third-party deployment, paid model quality or production HA.
+
+The library and examples contain no machine-local agent configuration, credential exports, private harness content or domain profiles. Deployment cutovers belong to their owning applications, not this public repository.

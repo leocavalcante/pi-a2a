@@ -1,0 +1,95 @@
+{
+  "name": "pi-a2a",
+  "version": "0.1.0",
+  "description": "A2A communication for Pi Durable agents and Pi coding-agent sessions",
+  "type": "module",
+  "license": "MIT",
+  "author": "leocavalcante",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leocavalcante/pi-a2a.git"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "keywords": [
+    "pi-package",
+    "a2a",
+    "pi",
+    "durable",
+    "agents"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./durable": {
+      "types": "./dist/durable.d.ts",
+      "import": "./dist/durable.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    },
+    "./extension": "./src/extension.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
+  },
+  "files": [
+    "dist",
+    "src",
+    "examples",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test --test-timeout=20000 --test-concurrency=1 tests/*.test.ts",
+    "example": "node --import tsx examples/echo.ts",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "@a2a-js/sdk": "1.3.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-durable": "1.5.0",
+    "typebox": "*"
+  },
+  "peerDependenciesMeta": {
+    "@earendil-works/chord": {
+      "optional": true
+    },
+    "@earendil-works/pi-durable": {
+      "optional": true
+    },
+    "@earendil-works/pi-coding-agent": {
+      "optional": true
+    },
+    "typebox": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@earendil-works/chord": "1.5.0",
+    "@earendil-works/pi-ai": "1.5.0",
+    "@earendil-works/pi-coding-agent": "1.5.0",
+    "@earendil-works/pi-durable": "1.5.0",
+    "@types/express": "^5.0.6",
+    "@types/node": "^22.19.0",
+    "express": "^5.1.0",
+    "tsx": "^4.20.6",
+    "typebox": "^1.0.0",
+    "typescript": "5.9.3"
+  }
+}
