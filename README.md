@@ -124,6 +124,20 @@ The snippet assumes your existing `harness` and `conversationsFor` function. For
 
 Public Agent Cards should disclose only intended capabilities. Private profiles, system prompts, tokens, filesystem paths and internal deployment addresses do not belong in them. Use TLS in production, directly or at a trusted local TLS proxy. Without an authentication callback the handler denies access; `allowUnauthenticatedLoopback` is an explicit exception for trusted local adapters/demos. The convenience `createA2AServer` is HTTP and should listen on loopback; production applications can mount the handler in their existing HTTPS server. Public source does not require public agents or a central gateway. When sharing an HTTP listener, protect its other data/message routes too: A2A-specific authentication does not secure unrelated legacy endpoints.
 
+### Existing submissions and the official CLI
+
+Use the official [`a2a`](https://github.com/a2aproject/a2a-cli) CLI, tested with release **v0.3.1** (A2A protocol 1.0):
+
+```sh
+a2a --config /private/path/agent.json card get
+a2a --config /private/path/agent.json send --request-payload request.json -o json
+a2a --config /private/path/agent.json task get TASK_ID --wait -o json
+```
+
+Keep the endpoint and authentication in a private CLI config, not shell arguments or source. For retry-safe automation, retain a standard SendMessageRequest JSON file with an explicit `message.messageId` before sending it; retry that exact payload after an uncertain send. The CLI's JSON task result uses a `task` envelope. An interrupted local wait does not cancel remote work.
+
+When replacing an older transport, the host may supply `existingSubmission(messageId, identity, conversation)` on `DurableA2AOptions`. Return the already admitted `submissionId` and the original UTF-8 text's lowercase `textSha256`, or `undefined`. The adapter checks that the input belongs to the resolved conversation, then persists its A2A binding without submitting it again. The old message ID becomes its task ID; both `GetTask(oldId)` and identical-message replay adopt it lazily. Conflicting text fails. Imported tasks join task listings after adoption, not via a scan of unrelated application data. Only the stored final answer is projected; unavailable original input text is not invented.
+
 ### Durable semantics
 
 - Server-generated A2A task/context IDs are distinct from caller message IDs and JSON-RPC correlation IDs.

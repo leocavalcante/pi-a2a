@@ -12,7 +12,7 @@ import { interrupted, terminal } from "./client.ts";
 type TaskRecord = { scope: string; conversationId: number; submissionId: number; settledId: number; task: { [key: string]: JsonValue } | null };
 const Tasks = defineDocFamily<TaskRecord, null>({ kind: "pi-a2a.task", version: 1, scope: "session", family: true,
   initial: () => ({ scope: "", conversationId: 0, submissionId: 0, settledId: 0, task: null }), checkpointWhen: () => true });
-const Messages = defineDocFamily<{ taskId: string; text: string; contextId: string }, null>({ kind: "pi-a2a.message", version: 1, scope: "session", family: true,
+const Messages = defineDocFamily<{ taskId: string; text: string; textSha256?: string; contextId: string }, null>({ kind: "pi-a2a.message", version: 1, scope: "session", family: true,
   initial: () => ({ taskId: "", text: "", contextId: "" }), checkpointWhen: () => true });
 const Owners = defineDocFamily<{ ids: string[]; contexts: Record<string, string> }, null>({ kind: "pi-a2a.owner", version: 1, scope: "session", family: true,
   initial: () => ({ ids: [], contexts: {} }), checkpointWhen: () => true });
@@ -25,6 +25,8 @@ const materialize = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const decodeTask = (value: unknown) => Task.fromJSON(materialize(value));
 const jsonTask = (value: Task) => materialize(Task.toJSON(value)) as { [key: string]: JsonValue };
 const now = () => new Date().toISOString();
+const textDigest = (text: string) => createHash("sha256").update(text).digest("hex");
+const sameText = (receipt: { text: string; textSha256?: string }, text: string) => receipt.textSha256 ? receipt.textSha256 === textDigest(text) : receipt.text === text;
 function malformed(message: string): never { throw new RequestMalformedError(message); }
 const checkId = (value: string) => { if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)) malformed("An ID must contain 1–128 ASCII ID characters."); };
 
@@ -35,6 +37,8 @@ export interface DurableA2AOptions {
   /** Resolve a host-owned conversation. Do not return one private conversation for unrelated users. */
   conversation: (identity: Identity) => Conversation | Promise<Conversation>;
   context?: Context;
+  /** Adopt an already admitted input by its old message ID, without resubmitting it. */
+  existingSubmission?: (messageId: string, identity: Identity, conversation: Conversation) => Promise<{ submissionId: SubmissionId; textSha256: string } | undefined>;
   /** Application-defined interruption, never guessed from model prose. Defaults to COMPLETED. */
   classifyAnswer?: (answer: string) => TaskState;
   pollIntervalMs?: number;
@@ -58,6 +62,37 @@ export class DurableA2A implements A2ARequestHandler {
     if (tenant !== (context.tenant ?? "")) malformed("The requested tenant does not match the authenticated call context.");
     const identity = { userId: context.user.userName, tenant };
     return { identity, scope: hash(identity) };
+  }
+  private async adoptExisting(id: string, identity: Identity, scope: string): Promise<void> {
+    checkId(id);
+    if (!this.options.existingSubmission || (await this.options.harness.snapshot(Tasks, id, this.context))?.task) return;
+    const key = hash([scope, id]);
+    if ((await this.options.harness.snapshot(Messages, key, this.context))?.taskId) return;
+    const conversation = await this.options.conversation(identity);
+    const existing = await this.options.existingSubmission(id, identity, conversation);
+    if (!existing) return;
+    if (!/^[a-f0-9]{64}$/.test(existing.textSha256)) malformed("Existing input needs its SHA-256 text digest.");
+    const handle = await this.options.harness.submission(existing.submissionId, this.context);
+    const submission = await handle?.status(this.context);
+    if (!submission || submission.type !== "input" || submission.conversationId !== conversation.id) malformed("Existing submission does not belong to this conversation.");
+    await this.options.harness.commit(async tx => {
+      const receipt = await tx.doc(Messages, key, null);
+      const record = await tx.doc(Tasks, id, null);
+      if (receipt.taskId || record.task) {
+        if (receipt.taskId !== id || record.scope !== scope || record.submissionId !== existing.submissionId || receipt.textSha256 !== existing.textSha256) malformed("Existing submission binding conflicts.");
+        return;
+      }
+      const owner = await tx.doc(Owners, scope, null);
+      const contextId = owner.contexts[String(conversation.id)] || randomUUID();
+      const binding = await tx.doc(Contexts, contextId, null);
+      if (binding.scope && (binding.scope !== scope || binding.conversationId !== conversation.id)) malformed("Context ownership changed.");
+      const task = Task.fromJSON({ id, contextId, metadata: { messageId: id, imported: true }, status: { state: "TASK_STATE_SUBMITTED", timestamp: now() } });
+      record.scope = scope; record.conversationId = conversation.id; record.submissionId = existing.submissionId; record.settledId = 0; record.task = jsonTask(task);
+      receipt.taskId = id; receipt.textSha256 = existing.textSha256; receipt.contextId = contextId;
+      binding.scope = scope; binding.conversationId = conversation.id;
+      owner.contexts[String(conversation.id)] = contextId;
+      if (!owner.ids.includes(id)) owner.ids.push(id);
+    }, this.context);
   }
   private async record(id: string, scope: string) {
     checkId(id);
@@ -138,10 +173,12 @@ export class DurableA2A implements A2ARequestHandler {
     if (params.configuration?.taskPushNotificationConfig) throw new PushNotificationNotSupportedError();
     if (params.configuration?.acceptedOutputModes.length && !params.configuration.acceptedOutputModes.includes("text/plain")) throw new ContentTypeNotSupportedError();
     if (message.extensions.length || message.referenceTaskIds.length) throw new UnsupportedOperationError("Protocol extensions and referenceTaskIds are not implemented by this text adapter.");
+    await this.adoptExisting(message.messageId, identity, scope);
+    if (message.taskId) await this.adoptExisting(message.taskId, identity, scope);
     const key = hash([scope, message.messageId]);
     const existing = await this.options.harness.snapshot(Messages, key, this.context);
     if (existing?.taskId) {
-      if (existing.text !== text || (message.contextId && message.contextId !== existing.contextId) || (message.taskId && message.taskId !== existing.taskId)) malformed("This message ID already belongs to another message.");
+      if (!sameText(existing, text) || (message.contextId && message.contextId !== existing.contextId) || (message.taskId && message.taskId !== existing.taskId)) malformed("This message ID already belongs to another message.");
       return existing.taskId;
     }
     let task: Task | undefined;
@@ -165,7 +202,7 @@ export class DurableA2A implements A2ARequestHandler {
     return this.options.harness.commit(async tx => {
       const receipt = await tx.doc(Messages, key, null);
       if (receipt.taskId) {
-        if (receipt.text !== text || (message.contextId && receipt.contextId !== message.contextId) || (message.taskId && receipt.taskId !== message.taskId)) malformed("This message ID already belongs to another message.");
+        if (!sameText(receipt, text) || (message.contextId && receipt.contextId !== message.contextId) || (message.taskId && receipt.taskId !== message.taskId)) malformed("This message ID already belongs to another message.");
         return receipt.taskId;
       }
       const owner = await tx.doc(Owners, scope, null);
@@ -200,10 +237,13 @@ export class DurableA2A implements A2ARequestHandler {
   }
   async getTask(params: GetTaskRequest, context: ServerCallContext): Promise<Task> {
     this.validateHistory(params.historyLength);
-    return this.history(await this.refresh(params.id, this.identity(context, params.tenant).scope), params.historyLength);
+    const { identity, scope } = this.identity(context, params.tenant);
+    await this.adoptExisting(params.id, identity, scope);
+    return this.history(await this.refresh(params.id, scope), params.historyLength);
   }
   async cancelTask(params: CancelTaskRequest, context: ServerCallContext): Promise<Task> {
-    const { scope } = this.identity(context, params.tenant);
+    const { identity, scope } = this.identity(context, params.tenant);
+    await this.adoptExisting(params.id, identity, scope);
     const task = await this.refresh(params.id, scope);
     if (terminal(task) || interrupted(task)) throw new TaskNotCancelableError();
     const record = await this.record(params.id, scope);
@@ -239,7 +279,9 @@ export class DurableA2A implements A2ARequestHandler {
   }
   async *resubscribe(params: SubscribeToTaskRequest, context: ServerCallContext): AsyncGenerator<StreamResponse> {
     if (!this.options.card.capabilities?.streaming) throw new UnsupportedOperationError();
-    const task = await this.refresh(params.id, this.identity(context, params.tenant).scope);
+    const { identity, scope } = this.identity(context, params.tenant);
+    await this.adoptExisting(params.id, identity, scope);
+    const task = await this.refresh(params.id, scope);
     if (terminal(task)) throw new UnsupportedOperationError();
     yield* this.updates(params.id, context);
   }
