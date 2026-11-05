@@ -11,8 +11,13 @@ export interface AgentTarget {
   bearerTokenFile?: string;
 }
 export interface AgentConfig { agents: Record<string, AgentTarget> }
-export const defaultConfigPath = () => process.env.PI_A2A_CONFIG ?? join(homedir(), ".config", "pi-a2a", "agents.json");
-export async function readAgentConfig(file = defaultConfigPath()): Promise<AgentConfig> {
+export async function defaultConfigPath() {
+  if (process.env.PI_A2A_CONFIG !== undefined) return process.env.PI_A2A_CONFIG;
+  const { CONFIG_DIR_NAME } = await import("@earendil-works/pi-coding-agent");
+  return join(homedir(), CONFIG_DIR_NAME, "a2a", "agents.json");
+}
+export async function readAgentConfig(file?: string): Promise<AgentConfig> {
+  file ??= await defaultConfigPath();
   let text: string;
   try {
     if ((await stat(file)).size > 65_536) throw new Error();

@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { access, mkdtemp, writeFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { AgentCard } from "@a2a-js/sdk";
 import { Value } from "typebox/value";
-import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { boundedText } from "../src/client.ts";
-import { configuredAgent, readAgentConfig } from "../src/config.ts";
+import { configuredAgent, defaultConfigPath, readAgentConfig } from "../src/config.ts";
 import { registerA2A } from "../src/extension.ts";
 import { card, fixture } from "./fixtures/agent.ts";
 
@@ -61,6 +61,24 @@ test("listing configured agents performs no discovery or model calls", async () 
   registerA2A(pi, { loadConfig: async () => ({ agents: { sample: { url: "https://example.invalid" } } }), connect: async () => { throw new Error("No connection expected"); } });
   const value = await tools.get("a2a_agents")!.execute("list", {}, undefined, undefined, ctx as never);
   assert.deepEqual((value.structuredContent as { agents: string[] }).agents, ["sample"]);
+});
+
+test("configuration defaults to Pi's a2a directory and honors PI_A2A_CONFIG", async t => {
+  const previous = process.env.PI_A2A_CONFIG;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_A2A_CONFIG;
+    else process.env.PI_A2A_CONFIG = previous;
+  });
+  delete process.env.PI_A2A_CONFIG;
+  assert.equal(await defaultConfigPath(), join(homedir(), CONFIG_DIR_NAME, "a2a", "agents.json"));
+
+  const dir = await mkdtemp(join(tmpdir(), "pi-a2a-config-path-")); t.after(() => rm(dir, { recursive: true }));
+  const file = join(dir, "agents.json");
+  const config = { agents: { sample: { url: "https://example.invalid" } } };
+  await writeFile(file, JSON.stringify(config));
+  process.env.PI_A2A_CONFIG = file;
+  assert.equal(await defaultConfigPath(), file);
+  assert.deepEqual(await readAgentConfig(), config);
 });
 
 test("configuration permits only explicit targets and environment credential references", async t => {

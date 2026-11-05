@@ -25,7 +25,7 @@ pi install git:github.com/leocavalcante/pi-a2a
 
 Pin a commit for reproducible use, for example `git:github.com/leocavalcante/pi-a2a@COMMIT`. Git installations load the TypeScript extension directly; building `dist` is not required. Pi supplies its own coding-agent and TypeBox packages.
 
-Create a **machine-local** `~/.config/pi-a2a/agents.json`:
+Create a **machine-local** `~/.pi/a2a/agents.json`:
 
 ```json
 {
@@ -42,7 +42,7 @@ Create a **machine-local** `~/.config/pi-a2a/agents.json`:
 }
 ```
 
-`PI_A2A_CONFIG` selects another configuration file. There is no hostname detection, ambient cluster, network scan or automatic cross-host fallback. Unknown agents fail closed. The file permits endpoint URLs and credential **references**, not literal tokens or arbitrary shell commands. Use `bearerTokenEnv` or an absolute `bearerTokenFile` path, never both. File-backed credentials are read only for requests, not exported to the whole Pi process. Keep credential files private (mode 600) and outside Git. Do not put the file or credentials in public dotfiles.
+The `.pi` directory comes from Pi's `CONFIG_DIR_NAME`. `PI_A2A_CONFIG` selects another configuration file. There is no hostname detection, ambient cluster, network scan or automatic cross-host fallback. Unknown agents fail closed. The file permits endpoint URLs and credential **references**, not literal tokens or arbitrary shell commands. Use `bearerTokenEnv` or an absolute `bearerTokenFile` path, never both. File-backed credentials are read only for requests, not exported to the whole Pi process. Keep credential files private (mode 600) and outside Git. Do not put the file or credentials in public dotfiles.
 
 The tools are:
 
