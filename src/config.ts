@@ -39,10 +39,11 @@ export async function readAgentConfig(file = defaultConfigPath()): Promise<Agent
     return value;
   } catch { throw new LocalA2AError("INVALID_CONFIGURATION"); }
 }
-export async function configuredAgent(name: string, config: AgentConfig) {
+export async function configuredAgent(name: string, config: AgentConfig, signal?: AbortSignal) {
   const target = Object.hasOwn(config.agents, name) ? config.agents[name] : undefined;
   if (!target) throw new LocalA2AError("AGENT_NOT_CONFIGURED");
   const options: ConnectionOptions = {
+    signal,
     allowHttpLoopback: target.allowHttpLoopback,
     allowedOrigins: target.allowedOrigins,
     headers: target.bearerTokenEnv || target.bearerTokenFile ? async () => {

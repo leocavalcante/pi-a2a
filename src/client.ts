@@ -13,6 +13,7 @@ export interface ConnectionOptions {
   allowedOrigins?: string[];
   allowHttpLoopback?: boolean;
   timeoutMs?: number;
+  signal?: AbortSignal;
   fetch?: typeof globalThis.fetch;
 }
 
@@ -22,6 +23,7 @@ const localErrors = {
   CONFIGURATION_UNREADABLE: "Cannot read A2A configuration; use a JSON file of at most 64 KiB.",
   AGENT_NOT_CONFIGURED: "This agent is not explicitly configured. Use a2a_agents and check the machine-local target file.",
   CREDENTIAL_MISSING: "The configured A2A credential file or environment variable is missing or invalid. Supply it outside the session transcript.",
+  AUTHENTICATION_FAILED: "The configured A2A peer rejected authentication or access. Check its private credential reference and permissions.",
   UNTRUSTED_ORIGIN: "The Agent Card selected an origin that is not configured as trusted.",
   RESPONSE_TOO_LARGE: "A2A response exceeds the 2 MiB document limit. Request less history or a smaller result.",
 } as const;
@@ -51,8 +53,12 @@ export async function connectAgent(baseUrl: string, options: ConnectionOptions =
     if (!origins.has(url.origin) || url.username || url.password) throw new LocalA2AError("UNTRUSTED_ORIGIN");
     const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
     for (const [key, value] of new Headers(await options.headers?.())) headers.set(key, value);
-    const signal = AbortSignal.any([...(init?.signal ? [init.signal] : []), AbortSignal.timeout(timeoutMs)]);
+    const signal = AbortSignal.any([...(options.signal ? [options.signal] : []), ...(init?.signal ? [init.signal] : []), AbortSignal.timeout(timeoutMs)]);
     const response = await (options.fetch ?? globalThis.fetch)(input, { ...init, headers, signal, redirect: "error" });
+    if (response.status === 401 || response.status === 403) {
+      try { await response.body?.cancel(); } catch { /* Preserve the authentication outcome even if body cleanup fails. */ }
+      throw new LocalA2AError("AUTHENTICATION_FAILED");
+    }
     // Streaming events have the SDK's per-event byte limit. Bound complete JSON documents too.
     if (response.headers.get("content-type")?.includes("text/event-stream")) return response;
     if (!response.body || response.status === 204 || response.status === 304) return response;

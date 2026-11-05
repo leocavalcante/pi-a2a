@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { access, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "node:http";
@@ -18,7 +18,7 @@ import { card, fixture } from "./fixtures/agent.ts";
 function mockPi() {
   const tools = new Map<string, ToolDefinition>();
   const entries: unknown[] = [];
-  const pi = { registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool), registerCommand() {},
+  const pi = { registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool), registerCommand() {}, on() { return () => {}; },
     appendEntry: (customType: string, data: unknown) => entries.push({ type: "custom", customType, data }) } as unknown as ExtensionAPI;
   const ctx = { sessionManager: { getBranch: () => entries } } as unknown as ExtensionContext;
   return { pi, tools, entries, ctx };
@@ -100,7 +100,7 @@ test("Unicode and JSON-escaped tool output stays bounded and remains valid data"
   }
 });
 
-async function sdkSession(dir: string, factory: (pi: ExtensionAPI) => void, script: ReturnType<typeof fauxAssistantMessage>[]) {
+async function sdkSession(dir: string, factory: (pi: ExtensionAPI) => void, script: ReturnType<typeof fauxAssistantMessage>[], manager = SessionManager.inMemory(dir)) {
   const faux = fauxProvider(); faux.setResponses(script);
   const runtime = await ModelRuntime.create({ authPath: join(dir, "auth.json"), modelsPath: null, modelsStorePath: join(dir, "models-cache.json"), refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
@@ -109,7 +109,7 @@ async function sdkSession(dir: string, factory: (pi: ExtensionAPI) => void, scri
     noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, extensionFactories: [factory] });
   await loader.reload();
   const session = await createAgentSession({ cwd: dir, agentDir: dir, modelRuntime: runtime, model: faux.getModel(), thinkingLevel: "off",
-    noTools: "builtin", resourceLoader: loader, settingsManager: settings, sessionManager: SessionManager.inMemory(dir) });
+    noTools: "builtin", resourceLoader: loader, settingsManager: settings, sessionManager: manager });
   assert.equal(session.extensionsResult.errors.length, 0);
   return { ...session, faux };
 }
@@ -144,6 +144,35 @@ test("the /a2a command sends without invoking a Pi-session model", async t => {
     assert.equal(faux.state.callCount, 0); assert.equal(f.faux.state.callCount, 1);
     assert.match(JSON.stringify(session.messages), /Hello over A2A/);
   } finally { session.dispose(); }
+});
+
+test("fresh command-only TUI receipts are not written to disk by Pi 1.5.0", async t => {
+  const f = await fixture(); t.after(f.close);
+  const dir = await mkdtemp(join(tmpdir(), "pi-a2a-command-persistence-")); t.after(() => rm(dir, { recursive: true }));
+  const manager = SessionManager.create(dir, join(dir, "sessions"));
+  const file = manager.getSessionFile()!;
+  let checkedIntent = false;
+  const { session, faux } = await sdkSession(dir, pi => registerA2A(pi, {
+    loadConfig: async () => ({ agents: { sample: { url: f.baseUrl, allowHttpLoopback: true } } }),
+    connect: async () => {
+      assert.ok(manager.getBranch().some(entry => entry.type === "custom" && entry.customType === "pi-a2a.receipt"));
+      await assert.rejects(access(file), { code: "ENOENT" });
+      checkedIntent = true;
+      return f.client;
+    },
+  }), [], manager);
+  try {
+    await session.bindExtensions({ mode: "tui" });
+    await session.prompt("/a2a send sample A synthetic command-only persistence check");
+    assert.equal(checkedIntent, true);
+    assert.equal(faux.state.callCount, 0);
+    assert.ok(manager.getBranch().some(entry => entry.type === "custom_message" && entry.customType === "pi-a2a"));
+    // appendEntry/sendMessage only changed memory: this history cannot be reopened after exit.
+    await assert.rejects(access(file), { code: "ENOENT" });
+  } finally {
+    await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    session.dispose();
+  }
 });
 
 export { sdkSession };

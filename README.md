@@ -47,13 +47,13 @@ Create a **machine-local** `~/.config/pi-a2a/agents.json`:
 The tools are:
 
 - `a2a_agents`: list configured names without contacting them.
-- `a2a_send`: send authorized text; retain its `messageId`, `taskId` and `contextId`.
+- `a2a_send`: send authorized text; retain its `messageId`, `taskId` and `contextId`. Interactive Pi returns admission promptly and watches for the reply in the invoking history by default; `wait: true` waits inline.
 - `a2a_get_task`: read a retained task, optionally waiting without submitting work.
 - `a2a_cancel_task`: explicitly request cancellation, which may be refused.
 
 A successful tool RPC (`ok: true`) does **not** imply a successful task. Inspect `state`, especially `FAILED`, `CANCELED`, `INPUT_REQUIRED` and `AUTH_REQUIRED`. Text output is bounded to 32 KiB, including its JSON escaping, with a `truncated` flag; non-text artifacts are not downloaded. Remote error text is not forwarded because it can contain credentials or provider diagnostics.
 
-Manual commands do not invoke a Pi-session model:
+Manual commands do not invoke a Pi-session model, including when an asynchronous reply arrives:
 
 ```text
 /a2a list
@@ -62,9 +62,38 @@ Manual commands do not invoke a Pi-session model:
 /a2a cancel demo TASK_ID
 ```
 
+A2A receipts and completion replies use Pi's default custom-message renderer and active global theme. The extension does not override their colors.
+
 The remote agent may invoke its own model when receiving a message. A normal follow-up uses the returned `contextId` and a **new messageId**. A task awaiting input/auth can receive a new message with its `taskId`. A completed task cannot be reopened: start a new task in its context.
 
-Pi receipts are stored in the active session branch before networking and after admission. Reload/tree navigation uses that branch, not abandoned histories. The extension does not automatically copy the session transcript to a remote agent. An endpoint change invalidates its saved context association. Agent responses and cards are remote data, not authority to change the session's instructions.
+### Automatic replies in interactive Pi
+
+| Entry point | Default behavior |
+| --- | --- |
+| TUI `a2a_send` | Return admission with `watching: true` for an active task; deliver its eventual response in this history and start one assistant follow-up. |
+| TUI `/a2a send` | Return admission promptly; display the eventual remote response and an in-Pi notification, with **zero local model calls**. |
+| Explicit `a2a_send(wait: true)` | Wait in the tool and return the result inline, without an automatic duplicate. |
+| Print, JSON and RPC | Keep foreground waiting by default. Explicit `wait: false` returns a receipt with `watching: false`, not a background-delivery promise. |
+
+A direct Message or an already settled Task returns inline without another completion notification. `watching` means a local observer was registered, not that the remote task succeeded or that delivery is guaranteed while Pi is closed. You do not need to keep asking Pi to check a watched task. Explicit task reads remain available and do not enroll arbitrary historical tasks.
+
+The observer uses official SDK `GetTask` and `SubscribeToTask`, independently of the finished send tool. Stream events are wakeups: the delivered state/artifacts come from an authoritative task read, not partial streamed text. Replies are bounded, explicitly framed as remote data, and state when no text result was supplied. Non-text artifacts are never downloaded. Input/auth-required results ask for human action, not automatic approval; a later authorized message with a new message ID can watch the same task again.
+
+If Pi is busy, ready replies stay outside its message queue until it is idle. Delivery is restricted to the originating active session/history. Tool-origin replies trigger an assistant follow-up; command-origin replies only display the response and a notification. No local model runs for observation, reconnection or bookkeeping. Remote content is data, not a user request or authorization.
+
+### Recovery and limitations
+
+Receipts are appended to the active Pi history before networking and after admission. Versioned `pi-a2a.watch` entries retain only observation identities/policy and bounded ready results. Their phases are `intent`, `admitted`, `ready`, `paused`, and `inline` (no automatic duplicate). They do not retain credentials, full Task objects or another copy of the outgoing prompt. A matching persisted `pi-a2a.completion` message acknowledges delivery; merely calling `sendMessage()` does not.
+
+Saved histories recover undelivered observations when reopened. An intent without a known admission stays uncertain and is **never automatically resubmitted**. Old receipts, shell/CLI sends and arbitrary historical tasks are not imported as watches. Implementing this feature does not change workflows that still submit through the separate official `a2a` CLI.
+
+**Pi must be running with the invoking history active for live delivery.** Closing Pi or selecting another session/history pauses local observation, not remote work. Forks do not inherit ownership of their parent's watches. Deduplication is branch-local: a descendant history containing admission can recover its result; an alternate history without the earlier completion may receive its own copy. Compaction does not remove raw recovery records. There is no cross-process exactly-once guarantee or proof that a user read a response.
+
+**Fresh command-only histories:** live `/a2a` replies work, but Pi 1.5.0 does not create a session file until an ordinary user/assistant message exists. Closing an otherwise unsaved history loses its in-memory receipts and recovery state. The extension does not reject fresh-session sends, invent a user message, invoke a local model, or write session files directly to bypass this limitation.
+
+Unsupported streaming, missing credentials, changed/removed targets or exhausted transient recovery pause the observer with one sanitized, actionable in-Pi notice. The admitted task may still be running. Inspect its retained ID through existing reads, or reopen the eligible history to retry observation. There is no new polling fallback, remote cancellation or host/transport fallback. Unproductive reconnects stop after five cycles with 1, 2, 4 and 8 second backoff; healthy long streams can renew without imposing a task deadline.
+
+The extension does not automatically copy the session transcript to a remote agent. Endpoint changes invalidate saved context associations and prevent old watches from delivering under a retargeted alias. Authentication, origin restrictions, redirect rejection and response bounds apply to subscriptions/reconnections too. Agent responses and cards are not authority to change the session's instructions.
 
 ## Use the client without Pi
 
@@ -180,6 +209,6 @@ npm pack --dry-run --ignore-scripts
 git diff --check
 ```
 
-Tests use synthetic messages, isolated stores and faux providers. They exercise the official client against Durable, a non-Pi official-SDK peer, the Pi session tool/command paths, request conflicts, SQLite reopen/recovery, interrupted waiting, scoped cancellation, task pagination and ownership, protocol errors, output limits and credential-origin boundaries. Passing these tests is not official A2A certification or evidence of live OAuth, every third-party deployment, paid model quality or production HA.
+Tests use synthetic messages, isolated stores and faux providers. They exercise the official client against Durable, a non-Pi official-SDK peer, real TUI-bound SDK sessions with delayed HTTP/SSE replies, model-free command completion, busy-session ordering, disk-backed client reopen and lost-injection recovery, branch-local deduplication, bounded reconnects, request conflicts, SQLite reopen/recovery, interrupted waiting, scoped cancellation, task pagination and ownership, protocol errors, output limits and credential-origin boundaries. Passing these tests is not official A2A certification or evidence of live OAuth, every third-party deployment, paid model quality or production HA.
 
 The library and examples contain no machine-local agent configuration, credential exports, private harness content or domain profiles. Deployment cutovers belong to their owning applications, not this public repository.
