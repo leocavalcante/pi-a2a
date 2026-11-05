@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { EventEmitter } from "node:events";
 import { setImmediate as turn } from "node:timers/promises";
-import { Message, StreamResponse, Task, TaskState } from "@a2a-js/sdk";
+import { Message, StreamResponse, Task, TaskState, TaskStatus } from "@a2a-js/sdk";
 import { UnsupportedOperationError } from "@a2a-js/sdk/errors";
 import { SessionManager, type ExtensionAPI, type ExtensionContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
@@ -23,10 +23,15 @@ async function local(peer = new Peer(), manager = SessionManager.inMemory(), mod
   const commands = new Map<string, Parameters<ExtensionAPI["registerCommand"]>[1]>();
   type Injection = { message: Parameters<ExtensionAPI["sendMessage"]>[0]; options: Parameters<ExtensionAPI["sendMessage"]>[1] };
   const injections: Injection[] = [], notices: string[] = [];
+  const widgets = new Map<string, string[]>();
   let busy = false, persistMessages = true, target = structuredClone(config), beforeConnect: (() => void) | undefined;
   const ctx = { mode, hasUI: mode === "tui" || mode === "rpc", sessionManager: manager,
     isIdle: () => !busy, hasPendingMessages: () => false,
-    ui: { notify: (message: string) => { notices.push(message); changes.emit("change"); } } } as unknown as ExtensionContext;
+    ui: {
+      notify: (message: string) => { notices.push(message); changes.emit("change"); },
+      theme: { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+      setWidget: (key: string, lines: string[] | undefined) => { if (lines) widgets.set(key, lines); else widgets.delete(key); changes.emit("change"); },
+    } } as unknown as ExtensionContext;
   const persist = (injection: Injection) => {
     const message = injection.message;
     manager.appendCustomMessageEntry(message.customType, message.content, message.display, message.details);
@@ -52,7 +57,7 @@ async function local(peer = new Peer(), manager = SessionManager.inMemory(), mod
   };
   registerA2A(pi, { loadConfig: async () => target, connect: async () => { beforeConnect?.(); return peer.client; } });
   await emit("session_start");
-  return { peer, pi, ctx, manager, changes, injections, notices, tools, emit, persist,
+  return { peer, pi, ctx, manager, changes, injections, notices, widgets, tools, emit, persist,
     busy: (value: boolean) => { busy = value; }, persistMessages: (value: boolean) => { persistMessages = value; },
     target: (value: AgentConfig) => { target = value; }, onConnect: (check: () => void) => { beforeConnect = check; },
     wait: (condition: () => boolean) => changedUntil(changes, condition),
@@ -114,6 +119,7 @@ test("navigation during an uncertain command send cannot append admission or its
   release.resolve(); await send; await turn();
   assert.equal(h.injections.length, 0); assert.equal(history(h.ctx).records.size, 0);
   assert.equal(h.peer.sent.length, 1); assert.equal(h.peer.subscriptions.length, 0);
+  assert.equal(h.widgets.size, 0);
 });
 
 test("observer deduplication binds endpoint, task and message identities, not just the message ID", async t => {
@@ -149,11 +155,13 @@ test("busy Pi retains ready state outside the SDK queue; simultaneous tasks drai
   h.peer.settle("task-2", TaskState.TASK_STATE_COMPLETED, "Second result");
   await h.wait(() => [...history(h.ctx).records.values()].filter(record => record.phase === "ready").length === 2);
   assert.equal(h.injections.length, 0);
+  assert.match([...h.widgets.values()].flat().join("\n"), /Response ready; waiting for Pi/);
   await h.emit("agent_settled"); await h.wait(() => h.injections.length === 1);
   await turn(); assert.equal(h.injections.length, 1);
   await h.emit("agent_settled"); await h.wait(() => h.injections.length === 2);
   assert.match(String(h.injections[0].message.content), /First result/);
   assert.match(String(h.injections[1].message.content), /Second result/);
+  assert.equal(h.widgets.size, 0);
 });
 
 test("a queued but unpersisted injection is not acknowledged, and reopening recovers it", async t => {
@@ -209,6 +217,7 @@ test("navigation before the watch excludes stale callbacks; descendant growth an
   await h.send(); const admissionLeaf = h.manager.getLeafId()!;
   await changedUntil(h.peer.events, () => h.peer.active === 1);
   h.manager.branch(before); await h.emit("session_tree");
+  assert.equal(h.widgets.size, 0);
   h.peer.settle(); await turn(); await turn(); assert.equal(h.injections.length, 0);
   h.manager.branch(admissionLeaf); await h.emit("session_tree");
   h.manager.appendCustomEntry("ordinary-growth", {});
@@ -253,6 +262,7 @@ test("unsupported streaming pauses once without inventing task failure or pollin
   const reply = await h.send(); assert.equal(reply.state, "TASK_STATE_WORKING");
   await h.wait(() => h.notices.length === 1);
   assert.match(h.notices[0], /STREAMING_UNAVAILABLE/);
+  assert.match([...h.widgets.values()].flat().join("\n"), /Observation paused; remote work may continue/);
   assert.equal(h.injections.length, 0); assert.equal(peer.reads.length, 1); assert.equal(peer.subscriptions.length, 0);
   assert.equal(peer.cancellations, 0);
 });
@@ -268,6 +278,16 @@ test("inline Messages, settled Tasks and explicit foreground waits never enqueue
   h.peer.read = id => task(TaskState.TASK_STATE_COMPLETED, "Foreground result", id);
   assert.equal((await h.send("foreground", true)).text, "Foreground result");
   await turn(); assert.equal(h.injections.length, 0); assert.equal(h.peer.subscriptions.length, 0);
+});
+
+test("an identical send settled inline clears its earlier observer's progress row", async t => {
+  const h = await local(); t.after(h.shutdown);
+  await h.send("same-id"); await changedUntil(h.peer.events, () => h.peer.active === 1);
+  h.peer.direct = task(TaskState.TASK_STATE_COMPLETED, "Inline settled result");
+  const reply = await h.send("same-id");
+  assert.equal(reply.text, "Inline settled result"); assert.equal(reply.watching, false);
+  await changedUntil(h.peer.events, () => h.peer.active === 0);
+  assert.equal(h.widgets.size, 0); assert.equal(h.injections.length, 0);
 });
 
 test("print, JSON and RPC retain foreground defaults and false non-TUI watching receipts", async t => {
@@ -375,6 +395,39 @@ test("shutdown aborts local streams, not remote work, and late callbacks cannot 
   h.peer.settle(); await turn(); await turn();
   assert.equal(h.peer.active, 0); assert.equal(h.peer.cancellations, 0);
   assert.equal(h.manager.getEntries().length, entries); assert.equal(h.injections.length, 0);
+  assert.equal(h.widgets.size, 0);
+});
+
+test("nonterminal status events update only the widget, without transcript or follow-up spam", async t => {
+  const h = await local(); t.after(h.shutdown);
+  await h.send(); await changedUntil(h.peer.events, () => h.peer.active === 1);
+  const updated = task(TaskState.TASK_STATE_WORKING, "Searching the synthetic catalog");
+  h.peer.tasks.set("task-1", updated);
+  h.peer.publish("task-1", StreamResponse.fromJSON({ statusUpdate: { taskId: "task-1", contextId: "context-1", status: TaskStatus.toJSON(updated.status!) } }));
+  await h.wait(() => [...h.widgets.values()].flat().join("\n").includes("Searching the synthetic catalog"));
+  assert.equal(h.injections.length, 0);
+  assert.doesNotMatch(JSON.stringify(h.manager.getEntries()), /Searching the synthetic catalog/);
+  assert.equal(h.peer.sent.length, 1); assert.equal(h.peer.subscriptions.length, 1);
+  h.peer.settle(); await h.wait(() => h.injections.length === 1 && h.widgets.size === 0);
+});
+
+test("a failed or uncertain admission clears its sending widget but retains the original intent", async t => {
+  const h = await local(); t.after(h.shutdown);
+  h.peer.client.transport.sendMessage = async () => { throw new Error("Synthetic uncertain send"); };
+  assert.equal((await h.send()).ok, false);
+  assert.equal(h.widgets.size, 0);
+  assert.ok([...history(h.ctx).records.values()].some(record => record.phase === "intent"));
+  assert.equal(h.peer.subscriptions.length, 0);
+});
+
+test("progress callbacks reject mismatched identities before displaying another task's text", async () => {
+  const peer = new Peer(); peer.tasks.set("task-1", task());
+  peer.stream = async function* () {
+    yield StreamResponse.fromJSON({ statusUpdate: { taskId: "other-task", contextId: "context-1", status: task(TaskState.TASK_STATE_WORKING, "Another task's private status").status } });
+  };
+  const updates: unknown[] = [];
+  await assert.rejects(observeTask(identity, async () => peer.client, new AbortController().signal, { onProgress: update => { updates.push(update); } }), /INVALID_CORRELATION/);
+  assert.doesNotMatch(JSON.stringify(updates), /Another task/);
 });
 
 test("completion framing is JSON-escaped/Unicode bounded, marked truncated and rejects malformed records", () => {

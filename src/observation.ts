@@ -6,6 +6,7 @@ import { Value } from "typebox/value";
 import { TaskState, taskStateToJSON, type Client, type Message, type Task } from "./client.ts";
 import { boundedText, endpoint, interrupted, isTask, LocalA2AError, safeError, terminal, textOf } from "./client.ts";
 import type { AgentConfig } from "./config.ts";
+import { ProgressDisplay, type ProgressUpdate } from "./progress.ts";
 
 export const Output = Type.Object({
   ok: Type.Boolean(), agent: Type.Optional(Type.String()), agents: Type.Optional(Type.Array(Type.String())),
@@ -126,9 +127,10 @@ export interface ObservationTiming {
   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
   now?: () => number;
 }
-/** SubscribeToTask events are wakeups; only an authoritative GetTask can supply a delivered result. */
+export interface ObservationOptions extends ObservationTiming { onProgress?: (update: ProgressUpdate) => void }
+/** Stream progress is display-only; only an authoritative GetTask can supply a delivered result. */
 export async function observeTask(record: Pick<Admitted, "taskId" | "contextId">, connect: (signal: AbortSignal) => Promise<Client>, signal: AbortSignal,
-  timing: ObservationTiming = {}): Promise<Task> {
+  timing: ObservationOptions = {}): Promise<Task> {
   const sleep = timing.sleep ?? ((ms, abort) => delay(ms, undefined, { signal: abort, ref: false }));
   const now = timing.now ?? Date.now;
   // Progress hashes span reconnects; connection IDs/timestamps are deliberately excluded.
@@ -142,6 +144,7 @@ export async function observeTask(record: Pick<Admitted, "taskId" | "contextId">
       signal.throwIfAborted();
       const task = correlate(await client.getTask({ id: record.taskId, tenant: "", historyLength: 0 }, { signal }), record);
       if (settled(task)) return task;
+      timing.onProgress?.({ phase: "observing", status: task.status });
       const signature = progressOf(task);
       productive = previous !== undefined && previous !== signature;
       previous = signature;
@@ -159,13 +162,16 @@ export async function observeTask(record: Pick<Admitted, "taskId" | "contextId">
             const next = progressOf(payload.value);
             if (next !== previous) { productive = true; previous = next; }
             if (settled(payload.value)) break;
+            timing.onProgress?.({ phase: "observing", status: payload.value.status });
           } else if (payload.$case === "statusUpdate") {
             const message = payload.value.status?.message;
             const next = hash(JSON.stringify([payload.value.status?.state, message ? textOf(message) : ""]));
             if (next !== lastStatus) { if (lastStatus !== undefined || payload.value.status?.state !== task.status?.state) productive = true; lastStatus = next; }
             if ([TaskState.TASK_STATE_COMPLETED, TaskState.TASK_STATE_FAILED, TaskState.TASK_STATE_CANCELED, TaskState.TASK_STATE_REJECTED,
               TaskState.TASK_STATE_INPUT_REQUIRED, TaskState.TASK_STATE_AUTH_REQUIRED].includes(payload.value.status?.state ?? 0)) break;
+            timing.onProgress?.({ phase: "observing", status: payload.value.status });
           } else {
+            timing.onProgress?.({ phase: "observing", artifact: true });
             const artifact = payload.value.artifact;
             const next = hash(JSON.stringify([artifact?.artifactId, artifact?.parts]));
             if (next !== lastArtifact) { if (payload.value.artifact) productive = true; lastArtifact = next; }
@@ -179,6 +185,7 @@ export async function observeTask(record: Pick<Admitted, "taskId" | "contextId">
           (permanent(streamError) && typeof streamError === "object" && streamError !== null && "statusCode" in streamError && [401, 403].includes(Number(streamError.statusCode)))) throw streamError;
       const current = correlate(await client.getTask({ id: record.taskId, tenant: "", historyLength: 0 }, { signal }), record);
       if (settled(current)) return current;
+      timing.onProgress?.({ phase: "observing", status: current.status });
       const next = progressOf(current);
       if (next !== previous) { productive = true; previous = next; }
       if (streamError && permanent(streamError)) throw streamError;
@@ -189,6 +196,7 @@ export async function observeTask(record: Pick<Admitted, "taskId" | "contextId">
     if (productive || now() - started >= 30_000) failures = 0;
     else failures++;
     if (failures >= 5) throw new ObservationError("OBSERVATION_PAUSED");
+    timing.onProgress?.({ phase: "reconnecting" });
     await sleep(1000 * 2 ** Math.max(0, failures - 1), signal);
   }
 }
@@ -210,7 +218,9 @@ export class WatchController {
   private scheduled?: NodeJS.Immediate;
   private draining = false;
   private again = false;
+  private display: ProgressDisplay;
   constructor(private pi: ExtensionAPI, private connections: Connections, private timing: ObservationTiming = {}) {
+    this.display = new ProgressDisplay(timing.now);
     pi.on("session_start", (_event, ctx) => { this.activate(ctx); });
     pi.on("session_tree", (_event, ctx) => { this.activate(ctx); });
     pi.on("session_shutdown", () => { this.stop(); });
@@ -243,21 +253,29 @@ export class WatchController {
     if (!validWatch(record)) throw new Error("Invalid local A2A observation identity.");
     this.ctx = ctx;
     if (!this.records.has(keyOf(record))) this.persist(record);
+    this.display.update(intentKey(record), record.agent, undefined, { phase: "sending" });
     return record;
+  }
+  clearProgress(record: Intent, scope: Scope): void {
+    if (this.ctx && this.valid(scope, this.ctx)) this.display.remove(intentKey(record));
   }
   inline(record: Intent, scope: Scope, task?: Task): void {
     if (!this.active(record, scope.generation)) return;
     const inline: Watch = { ...record, phase: "inline", ...(task ? { taskId: task.id, contextId: task.contextId } : {}) };
     this.running.get(keyOf(inline))?.abort();
+    this.display.remove(intentKey(record));
+    this.display.remove(keyOf(inline));
     this.persist(inline);
   }
   admit(record: Intent, task: Task, scope: Scope): boolean {
     if (!this.active(record, scope.generation)) return false;
     const admitted: Admitted = { ...record, phase: "admitted", taskId: task.id, contextId: task.contextId };
     const previous = this.records.get(keyOf(admitted));
-    if (previous?.phase === "ready" || previous?.phase === "inline") { this.schedule(); return false; }
+    if (previous?.phase === "ready" || previous?.phase === "inline") { this.display.remove(intentKey(record)); this.schedule(); return false; }
     if (!validWatch(admitted)) throw new Error("Invalid local A2A observation admission.");
     this.persist(admitted);
+    this.display.move(intentKey(record), keyOf(admitted));
+    this.display.update(keyOf(admitted), admitted.agent, admitted.taskId, { status: task.status });
     this.start(admitted, scope.generation);
     return true;
   }
@@ -267,12 +285,14 @@ export class WatchController {
     if (this.scheduled) clearImmediate(this.scheduled);
     this.scheduled = undefined;
     for (const abort of this.running.values()) abort.abort();
+    this.display.clear();
     this.running.clear(); this.queued.clear(); this.notices.clear(); this.records.clear(); this.ctx = undefined;
   }
   private activate(ctx: ExtensionContext): void {
     this.stop(); this.stopped = false;
     if (ctx.mode !== "tui") return;
     this.ctx = ctx;
+    this.display.bind(ctx);
     this.records = history(ctx).records;
     for (const [key, record] of this.records) {
       if (record.phase === "paused" && record.reply && record.deliveryKey) this.records.set(key, { ...record, phase: "ready", reply: record.reply, deliveryKey: record.deliveryKey });
@@ -284,7 +304,9 @@ export class WatchController {
       if (this.stopped || generation !== this.generation) return;
       const delivered = history(ctx).delivered;
       for (const record of this.records.values()) {
-        if ((record.phase === "admitted" || record.phase === "paused") && !("deliveryKey" in record && record.deliveryKey && delivered.has(record.deliveryKey))) this.start(record, generation);
+        if ("deliveryKey" in record && record.deliveryKey && delivered.has(record.deliveryKey)) continue;
+        if (record.phase === "admitted" || record.phase === "paused") this.start(record, generation);
+        else if (record.phase === "ready") this.display.update(keyOf(record), record.agent, record.taskId, { phase: "ready" });
       }
       this.schedule();
     });
@@ -293,6 +315,7 @@ export class WatchController {
     const key = keyOf(record);
     if (this.running.has(key) || !this.active(record, generation)) return;
     const abort = new AbortController(); this.running.set(key, abort);
+    this.display.update(key, record.agent, record.taskId, {});
     void this.run(record, generation, abort);
   }
   private async target(record: Watch, signal?: AbortSignal): Promise<AgentConfig> {
@@ -307,8 +330,11 @@ export class WatchController {
         const config = await this.target(record, signal);
         if (!this.active(record, generation)) { abort.abort(); signal.throwIfAborted(); }
         return this.connections.connect(record.agent, config, signal);
-      }, abort.signal, this.timing);
+      }, abort.signal, { ...this.timing, onProgress: update => {
+        if (this.active(record, generation) && !abort.signal.aborted) this.display.update(keyOf(record), record.agent, record.taskId, update);
+      } });
       if (this.active(record, generation) && !abort.signal.aborted) {
+        this.display.update(keyOf(record), record.agent, record.taskId, { phase: "ready" });
         this.persist(readyRecord(record, task)); this.schedule();
       }
     } catch (error) {
@@ -321,6 +347,7 @@ export class WatchController {
   private pause(record: Pending, generation: number, error: unknown): void {
     if (!this.active(record, generation)) return;
     const issue = error instanceof ObservationError ? error.issue : "OBSERVATION_UNAVAILABLE";
+    this.display.update(keyOf(record), record.agent, record.taskId, { phase: "paused" });
     try { this.persist({ ...record, phase: "paused", issue }); } catch { /* Keep the last persisted admission/ready event for recovery. */ }
     const key = `${keyOf(record)}:${issue}`;
     if (this.notices.has(key)) return;
@@ -339,6 +366,7 @@ export class WatchController {
   }
   private acknowledge(record: Ready, generation: number): boolean {
     if (!this.active(record, generation) || !history(this.ctx!).delivered.has(record.deliveryKey)) return false;
+    this.display.remove(keyOf(record));
     if (this.queued.delete(record.deliveryKey) && record.policy === "display") {
       try { this.ctx!.ui.notify(`A2A response available from ${JSON.stringify(record.agent)} (${record.reply.state}).`, "info"); } catch { /* No external notification fallback. */ }
     }

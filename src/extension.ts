@@ -29,6 +29,7 @@ export function registerA2A(pi: ExtensionAPI, options: ExtensionOptions = {}) {
     const scope = ctx.mode === "tui" ? watches.capture(ctx) : undefined;
     const current = () => !scope || watches.valid(scope, ctx);
     let receipt: Receipt | undefined;
+    let intent: ReturnType<typeof watches.intent>;
     try {
       const config = await load();
       if (!Object.hasOwn(config.agents, agent)) throw new LocalA2AError("AGENT_NOT_CONFIGURED");
@@ -41,7 +42,7 @@ export function registerA2A(pi: ExtensionAPI, options: ExtensionOptions = {}) {
       receipt = { agent, endpoint, messageId, toolCallId: callId, ...(activeContext ? { contextId: activeContext } : {}), ...(taskId ? { taskId } : {}) };
       // Persist intent BEFORE even discovery/network I/O. Do not capture the session transcript or credentials.
       pi.appendEntry(kind, receipt);
-      const intent = scope && !wait ? watches.intent(ctx, scope, { agent, endpoint, messageId, toolCallId: callId, policy: command ? "display" : "followUp" }) : undefined;
+      intent = scope && !wait ? watches.intent(ctx, scope, { agent, endpoint, messageId, toolCallId: callId, policy: command ? "display" : "followUp" }) : undefined;
       update?.(result({ ok: true, agent, messageId, state: "SENDING" }));
       const client = await connect(agent, config, signal);
       if (!current()) throw new Error("The originating Pi history is no longer active.");
@@ -60,6 +61,7 @@ export function registerA2A(pi: ExtensionAPI, options: ExtensionOptions = {}) {
       } else if (intent && scope) watches.inline(intent, scope);
       return { ...summarize(agent, value, messageId), ...(!wait ? { watching } : {}) };
     } catch (error) {
+      if (intent && scope) watches.clearProgress(intent, scope);
       return { ok: false, agent, ...(receipt ? { messageId: receipt.messageId, ...(receipt.taskId ? { taskId: receipt.taskId } : {}), ...(receipt.contextId ? { contextId: receipt.contextId } : {}) } : {}), error: safeError(error) };
     }
   };

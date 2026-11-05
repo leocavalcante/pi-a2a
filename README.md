@@ -15,7 +15,7 @@ Node **22.19+**, Pi coding agent / Pi Durable **1.5.0**, official `@a2a-js/sdk` 
 
 The server exposes **JSON-RPC over HTTP**, Agent Card discovery, send/get/list tasks, cursor pagination, follow-ups, status/artifact streaming and subscription. The client negotiates **JSON-RPC or HTTP+JSON/REST** through the official SDK. It can talk to non-Pi implementations using those interfaces. gRPC and v0.3 compatibility are not enabled here. Authentication, supported media and capabilities still have to match.
 
-The Durable adapter accepts **text/plain**, up to **8192 UTF-8 bytes**. It does not fetch attachments, expose files or execute instructions from an Agent Card. Optional push notifications, extended cards, protocol extensions and reference-task processing are not advertised or implemented. Streaming reports task state and committed final artifacts; it does not promise provider-token streaming or byte-for-byte replay of an old stream.
+The Durable adapter accepts **text/plain**, up to **8192 UTF-8 bytes**. It does not fetch attachments, expose files or execute instructions from an Agent Card. Optional push notifications, extended cards, protocol extensions and reference-task processing are not advertised or implemented. Streaming reports task state, fixed progress descriptions, and committed final artifacts; it does not promise provider-token streaming or byte-for-byte replay of an old stream.
 
 ## Install as a Pi extension
 
@@ -77,9 +77,25 @@ The remote agent may invoke its own model when receiving a message. A normal fol
 
 A direct Message or an already settled Task returns inline without another completion notification. `watching` means a local observer was registered, not that the remote task succeeded or that delivery is guaranteed while Pi is closed. You do not need to keep asking Pi to check a watched task. Explicit task reads remain available and do not enroll arbitrary historical tasks.
 
-The observer uses official SDK `GetTask` and `SubscribeToTask`, independently of the finished send tool. Stream events are wakeups: the delivered state/artifacts come from an authoritative task read, not partial streamed text. Replies are bounded, explicitly framed as remote data, and state when no text result was supplied. Non-text artifacts are never downloaded. Input/auth-required results ask for human action, not automatic approval; a later authorized message with a new message ID can watch the same task again.
+The observer uses official SDK `GetTask` and `SubscribeToTask`, independently of the finished send tool. Intermediate task/status events update the progress display; the delivered completion state/artifacts still come from an authoritative task read, not partial streamed text. Replies are bounded, explicitly framed as remote data, and state when no text result was supplied. Non-text artifacts are never downloaded. Input/auth-required results ask for human action, not automatic approval; a later authorized message with a new message ID can watch the same task again.
 
 If Pi is busy, ready replies stay outside its message queue until it is idle. Delivery is restricted to the originating active session/history. Tool-origin replies trigger an assistant follow-up; command-origin replies only display the response and a notification. No local model runs for observation, reconnection or bookkeeping. Remote content is data, not a user request or authorization.
+
+### Live progress
+
+Interactive background sends, from either `/a2a send` or `a2a_send`, show a themed, animated widget near the editor:
+
+```text
+A2A
+⠋ demo [a1b2c3d4] · Generating response (turn 1, attempt 1)
+  watching 23s · last event 18s ago
+```
+
+The Durable adapter derives status messages from the submission's own committed live state: queued, working, generating a response, retry backoff, deferred model response, blocking compaction, or completed tool counts. It does not publish reasoning, model partials, tool names/arguments/output, or retry diagnostics. Unchanged stages do not create synthetic progress events. These are standard A2A status messages, also available to other A2A clients through task reads and streaming.
+
+The widget keeps separate rows for concurrent tasks (up to five visible, with an overflow count), shows reconnecting or observation-paused states, and retains a ready indicator if Pi is busy before delivery. It clears after delivery or session navigation/shutdown. Widget updates use bounded, single-line, terminal-control-safe status text; these updates are never injected into model context or saved as progress history. No local model calls or additional polling are used for the display. Foreground waits and non-TUI modes retain their existing behavior.
+
+`watching` measures time since this local observation began, resetting when a history reopens. `last event` measures receipt of a remote task/status/artifact event or task-read status, not proven forward progress. The animation indicates local observation, not remote health; silence alone does not mark the remote task failed. No completion percentage is invented. Existing agents need an updated adapter in their owning application to report the richer stages; a client-only update can still display their coarse task state. Deployment cutovers remain application-owned.
 
 ### Recovery and limitations
 

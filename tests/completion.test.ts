@@ -7,6 +7,8 @@ import { join } from "node:path";
 import { setImmediate as turn } from "node:timers/promises";
 import { TaskState } from "@a2a-js/sdk";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { createRegistry, defineExtension, defineTool } from "@earendil-works/pi-durable";
+import { fixture } from "./fixtures/agent.ts";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { registerA2A, type ExtensionOptions } from "../src/extension.ts";
 import { completionKind, history, watchKind, type Reply } from "../src/observation.ts";
@@ -15,7 +17,7 @@ import { changedUntil, deferred, httpPeer, Peer } from "./fixtures/completion.ts
 async function sdk(dir: string, options: ExtensionOptions, script: ReturnType<typeof fauxAssistantMessage>[], manager = SessionManager.inMemory(dir), extra?: (pi: ExtensionAPI) => void,
   dropCompletion?: (message: Parameters<ExtensionAPI["sendMessage"]>[0]) => boolean) {
   const faux = fauxProvider(); faux.setResponses(script);
-  const events = new EventEmitter(), notices: string[] = [], errors: string[] = [];
+  const events = new EventEmitter(), notices: string[] = [], errors: string[] = [], widgets = new Map<string, string[]>();
   const runtime = await ModelRuntime.create({ authPath: join(dir, "auth.json"), modelsPath: null, modelsStorePath: join(dir, "models-cache.json"), refreshOnCreate: false });
   runtime.registerNativeProvider(faux.provider);
   const settings = SettingsManager.inMemory({ compaction: { enabled: false } });
@@ -34,9 +36,13 @@ async function sdk(dir: string, options: ExtensionOptions, script: ReturnType<ty
     noTools: "builtin", resourceLoader: loader, settingsManager: settings, sessionManager: manager });
   assert.deepEqual(extensionsResult.errors, []);
   session.subscribe(() => events.emit("change"));
-  await session.bindExtensions({ mode: "tui", uiContext: { notify: (text: string) => { notices.push(text); events.emit("change"); } } as ExtensionUIContext,
+  await session.bindExtensions({ mode: "tui", uiContext: {
+    notify: (text: string) => { notices.push(text); events.emit("change"); },
+    theme: { fg: (_color: string, text: string) => text, bold: (text: string) => text },
+    setWidget: (key: string, lines: string[] | undefined) => { if (lines) widgets.set(key, lines); else widgets.delete(key); events.emit("change"); },
+  } as unknown as ExtensionUIContext,
     onError: error => { errors.push(error.error); events.emit("change"); } });
-  return { session, faux, manager, events, notices, errors,
+  return { session, faux, manager, events, notices, errors, widgets,
     wait: (condition: () => boolean) => changedUntil(events, condition),
     completions: () => manager.getBranch().filter(entry => entry.type === "custom_message" && entry.customType === completionKind),
     close: async () => {
@@ -188,4 +194,34 @@ test("disk-backed ready event survives an SDK injection lost before persistence,
   await turn(); await turn(); await turn();
   assert.equal(third.faux.state.callCount, 0); assert.equal(third.completions().length, 1);
   assert.equal(peer.sent.length, 1); assert.deepEqual(third.errors, []);
+});
+
+test("Durable stages reach a real Pi progress widget over HTTP/SSE without local model calls", async t => {
+  const registry = createRegistry(), entered = deferred(), release = deferred();
+  registry.install(defineExtension({ name: "synthetic-progress", tools: [defineTool({
+    name: "hold", description: "A synthetic gated tool", parameters: { type: "object", properties: {} },
+    async execute() { entered.resolve(); await release.promise; return { output: [{ type: "text", text: "Private tool result" }] }; },
+  })] }));
+  const f = await fixture({ registry, tokensPerSecond: 60 });
+  t.after(async () => { release.resolve(); await f.close(); });
+  f.faux.setResponses([
+    fauxAssistantMessage([fauxToolCall("hold", {})], { stopReason: "toolUse" }),
+    say("A synthetic final answer long enough to observe the next generation before this task completes."),
+  ]);
+  const dir = await directory(t);
+  const s = await sdk(dir, { loadConfig: async () => ({ agents: { sample: { url: f.baseUrl, allowHttpLoopback: true } } }) }, []);
+  t.after(s.close);
+  await s.session.prompt("/a2a send sample A synthetic progress request");
+  await entered.promise;
+  const display = () => [...s.widgets.values()].flat().join("\n");
+  await s.wait(() => display().includes("Running tools (0/1 complete)"));
+  assert.match(display(), /watching .*last event/);
+  assert.doesNotMatch(display(), /Private tool result/);
+  assert.equal(s.faux.state.callCount, 0); assert.equal(s.completions().length, 0);
+  release.resolve();
+  await s.wait(() => display().includes("Generating response (turn 2, attempt 1)"));
+  await s.wait(() => s.completions().length === 1 && s.widgets.size === 0);
+  assert.match(JSON.stringify(s.completions()), /A synthetic final answer/);
+  assert.equal(s.faux.state.callCount, 0); assert.equal(f.faux.state.callCount, 2);
+  assert.deepEqual(s.errors, []);
 });

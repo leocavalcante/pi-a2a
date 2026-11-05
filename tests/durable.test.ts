@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { EventEmitter } from "node:events";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
+import { createRegistry, defineExtension, defineTool, type LiveState } from "@earendil-works/pi-durable";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,7 +11,8 @@ import { Message, SendMessageRequest, TaskState } from "@a2a-js/sdk";
 import { ServerCallContext } from "@a2a-js/sdk/server";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { isTask, sendText, textOf, waitForTask, streamText } from "../src/client.ts";
-import { fixture } from "./fixtures/agent.ts";
+import { context, fixture } from "./fixtures/agent.ts";
+import { changedUntil, deferred } from "./fixtures/completion.ts";
 
 const completed = async (f: Awaited<ReturnType<typeof fixture>>, text = "Hello", id = "message-1", contextId?: string) => {
   const value = await sendText(f.client, text, { messageId: id, contextId });
@@ -179,6 +183,44 @@ test("invalid history and empty-list filters are rejected before admission", asy
   await assert.rejects(f.client.listTasks({ ...query, historyLength: -1 }), /historyLength/);
   await assert.rejects(f.client.listTasks({ ...query, status: TaskState.UNRECOGNIZED }), /state/);
   assert.equal(f.faux.state.callCount, 0);
+});
+
+test("progress is stable, submission-scoped, and reports completed tool counts without private data", async t => {
+  const registry = createRegistry(), entered = [deferred(), deferred()], release = [deferred(), deferred()];
+  registry.install(defineExtension({ name: "progress-test", tools: [defineTool({
+    name: "hold", description: "Synthetic gated tool", parameters: { type: "object", properties: { index: { type: "number" } } },
+    async execute(args) {
+      const index = (args as { index: number }).index;
+      entered[index].resolve(); await release[index].promise;
+      return { output: [{ type: "text", text: "synthetic-private-tool-output" }] };
+    },
+  })] }));
+  const f = await fixture({ registry });
+  t.after(async () => { release.forEach(item => item.resolve()); await f.close(); });
+  f.faux.setResponses([
+    fauxAssistantMessage([fauxText("synthetic-private-commentary"), fauxToolCall("hold", { index: 0 }), fauxToolCall("hold", { index: 1 })], { stopReason: "toolUse" }),
+    fauxAssistantMessage([fauxText("Final answer")]),
+  ]);
+  const watch = await f.root.watch(context), events = new EventEmitter();
+  watch.start(async () => { events.emit("change"); }); t.after(() => watch.stop());
+  const active = await sendText(f.client, "Run synthetic tools", { messageId: "progress-tools" }); assert.ok(isTask(active));
+  await Promise.all(entered.map(item => item.promise));
+  const first = await f.client.getTask({ id: active.id, tenant: "", historyLength: 0 });
+  assert.equal(textOf(first), "Running tools (0/2 complete)");
+  assert.doesNotMatch(JSON.stringify(first), /synthetic-private/);
+  assert.deepEqual(await f.client.getTask({ id: active.id, tenant: "", historyLength: 0 }), first);
+  const queued = await sendText(f.client, "Queued synthetic request", { messageId: "progress-queued" }); assert.ok(isTask(queued));
+  assert.equal(queued.status?.state, TaskState.TASK_STATE_SUBMITTED); assert.equal(textOf(queued), "Queued");
+  assert.doesNotMatch(JSON.stringify(queued), /Running tools|synthetic-private/);
+  await f.client.cancelTask({ id: queued.id, tenant: "", metadata: undefined });
+  release[0].resolve();
+  await changedUntil(events, () => (watch.value.docs["pi.live"] as LiveState | undefined)?.tools?.filter(tool => tool.status === "done").length === 1);
+  const advanced = await f.client.getTask({ id: active.id, tenant: "", historyLength: 0 });
+  assert.equal(textOf(advanced), "Running tools (1/2 complete)");
+  assert.notEqual(advanced.status?.message?.messageId, first.status?.message?.messageId);
+  release[1].resolve();
+  const done = await waitForTask(f.client, active.id, { intervalMs: 10 });
+  assert.equal(textOf(done), "Final answer"); assert.equal(f.faux.state.callCount, 2);
 });
 
 test("unsupported content and invalid UTF-8 byte lengths never admit model work", async t => {

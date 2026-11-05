@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
-import { AssistantEntry, defineDocFamily, LiveDoc, type Conversation, type ConversationId, type Harness, type SubmissionId } from "@earendil-works/pi-durable";
+import { AssistantEntry, defineDocFamily, LiveDoc, type Conversation, type ConversationId, type Harness, type LiveState, type SubmissionId } from "@earendil-works/pi-durable";
 import { AgentCard, Message, Role, StreamResponse, Task, TaskState, type SendMessageRequest, type GetTaskRequest, type ListTasksRequest, type ListTasksResponse, type CancelTaskRequest, type SubscribeToTaskRequest } from "@a2a-js/sdk";
 import { ContentTypeNotSupportedError, PushNotificationNotSupportedError, RequestMalformedError, TaskNotCancelableError, TaskNotFoundError, UnsupportedOperationError } from "@a2a-js/sdk/errors";
 import type { A2ARequestHandler, ServerCallContext } from "@a2a-js/sdk/server";
@@ -27,6 +27,15 @@ const jsonTask = (value: Task) => materialize(Task.toJSON(value)) as { [key: str
 const now = () => new Date().toISOString();
 const textDigest = (text: string) => createHash("sha256").update(text).digest("hex");
 const sameText = (receipt: { text: string; textSha256?: string }, text: string) => receipt.textSha256 ? receipt.textSha256 === textDigest(text) : receipt.text === text;
+/** Fixed descriptions only: never publish reasoning, arguments, output, or retry diagnostics. */
+function progressText(live: LiveState): string {
+  if (live.compactions?.some(item => item.blocking)) return "Compacting conversation";
+  if (live.generation?.retry) return "Waiting to retry model request";
+  if (live.generation?.deferred) return "Waiting for model response";
+  if (live.tools?.length) return `Running tools (${live.tools.filter(tool => tool.status === "done").length}/${live.tools.length} complete)`;
+  if (live.generation) return `Generating response (turn ${(live.run?.turns ?? 0) + 1}, attempt ${live.generation.attempt})`;
+  return "Working";
+}
 function malformed(message: string): never { throw new RequestMalformedError(message); }
 const checkId = (value: string) => { if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)) malformed("An ID must contain 1–128 ASCII ID characters."); };
 
@@ -135,9 +144,6 @@ export class DurableA2A implements A2ARequestHandler {
       if (!answer.trim()) { answer = undefined; state = TaskState.TASK_STATE_FAILED; }
     } else if (status.status === "unanswered") {
       state = status.reason === "aborted" || status.reason === "withdrawn" ? TaskState.TASK_STATE_CANCELED : TaskState.TASK_STATE_FAILED;
-    } else {
-      const live = await this.options.harness.snapshot(LiveDoc, record.conversationId as ConversationId, this.context);
-      if (live?.run?.inputs.includes(submission.id)) state = TaskState.TASK_STATE_WORKING;
     }
     return this.options.harness.commit(async tx => {
       const current = await tx.doc(Tasks, id, null);
@@ -146,8 +152,20 @@ export class DurableA2A implements A2ARequestHandler {
       // A sibling poll or a follow-up may have advanced this task while the status was read.
       if (current.submissionId !== record.submissionId || current.settledId === record.submissionId) return value;
       const settled = status.status === "done" || status.status === "unanswered";
-      if (value.status?.state !== state || settled) {
-        value.status = { state, timestamp: now(), message: undefined };
+      let progress: string | undefined;
+      if (!settled) {
+        // Read on the commit line: deriving a retained status must also store any deferred live changes.
+        const live = await tx.doc(LiveDoc, record.conversationId as ConversationId);
+        if (live.run?.inputs.includes(submission.id)) {
+          state = TaskState.TASK_STATE_WORKING;
+          progress = progressText(live);
+        } else progress = "Queued";
+      }
+      const previous = value.status?.message?.parts.map(part => part.content?.$case === "text" ? part.content.value : "").join("\n");
+      if (value.status?.state !== state || previous !== progress || settled) {
+        value.status = { state, timestamp: now(), message: progress === undefined ? undefined : Message.fromJSON({
+          messageId: randomUUID(), contextId: value.contextId, taskId: id, role: "ROLE_AGENT", parts: [{ text: progress, mediaType: "text/plain" }],
+        }) };
         if (answer !== undefined) {
           const reply = Message.fromJSON({ messageId: `answer-${submission.id}`, contextId: value.contextId, taskId: id, role: "ROLE_AGENT", parts: [{ text: answer, mediaType: "text/plain" }] });
           value.history = [...value.history, reply].slice(-50);
