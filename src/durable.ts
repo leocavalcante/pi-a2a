@@ -3,7 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, defineDocFamily, LiveDoc, type Conversation, type ConversationId, type Harness, type LiveState, type SubmissionId } from "@earendil-works/pi-durable";
-import { AgentCard, Message, Role, StreamResponse, Task, TaskState, type SendMessageRequest, type GetTaskRequest, type ListTasksRequest, type ListTasksResponse, type CancelTaskRequest, type SubscribeToTaskRequest, TaskPushNotificationConfig, type GetTaskPushNotificationConfigRequest, type ListTaskPushNotificationConfigsRequest, type DeleteTaskPushNotificationConfigRequest, type ListTaskPushNotificationConfigsResponse } from "@a2a-js/sdk";
+import { AgentCard, Artifact, Message, Role, StreamResponse, Task, TaskState, type SendMessageRequest, type GetTaskRequest, type ListTasksRequest, type ListTasksResponse, type CancelTaskRequest, type SubscribeToTaskRequest, TaskPushNotificationConfig, type GetTaskPushNotificationConfigRequest, type ListTaskPushNotificationConfigsRequest, type DeleteTaskPushNotificationConfigRequest, type ListTaskPushNotificationConfigsResponse } from "@a2a-js/sdk";
 import { ContentTypeNotSupportedError, PushNotificationNotSupportedError, RequestMalformedError, TaskNotCancelableError, TaskNotFoundError, UnsupportedOperationError } from "@a2a-js/sdk/errors";
 import type { A2ARequestHandler, ServerCallContext } from "@a2a-js/sdk/server";
 import { interrupted, terminal } from "./client.ts";
@@ -54,6 +54,8 @@ export interface DurableA2AOptions {
   pollIntervalMs?: number;
   /** Accept bounded inline JPEG/PNG parts. Defaults to false. */
   images?: boolean;
+  /** Read-only, host-owned URL artifacts from a committed completed task, including retained tasks. */
+  fileArtifacts?: (task: Readonly<Task>) => Promise<Artifact[]>;
   /** Explicit callback trust. The host starts/stops the pump with its existing owner. */
   push?: PushOptions;
 }
@@ -71,9 +73,10 @@ export class DurableA2A implements A2ARequestHandler {
     if (Boolean(options.card.capabilities?.pushNotifications) !== Boolean(options.push)) throw new Error("Push capability requires explicit callback trust and lifecycle configuration.");
     if (options.push) this.push = new DurablePush(options.harness, this.context, options.push, (id, scope) => this.refresh(id, scope));
     const allowedInputs = options.images ? ["text/plain", "image/jpeg", "image/png"] : ["text/plain"];
-    if (!options.card.defaultInputModes.length || !options.card.defaultOutputModes.length ||
-        options.card.defaultInputModes.some(mode => !allowedInputs.includes(mode)) || options.card.defaultOutputModes.some(mode => mode !== "text/plain") ||
-        options.card.skills.some(skill => [...skill.inputModes].some(mode => !allowedInputs.includes(mode)) || [...skill.outputModes].some(mode => mode !== "text/plain"))) throw new Error("Advertise only supported input modes and text/plain output modes.");
+    const allowedOutputs = options.fileArtifacts ? options.card.defaultOutputModes : ["text/plain"];
+    if (!options.card.defaultInputModes.length || !options.card.defaultOutputModes.includes("text/plain") ||
+        options.card.defaultInputModes.some(mode => !allowedInputs.includes(mode)) || options.card.defaultOutputModes.some(mode => !mode || !allowedOutputs.includes(mode)) ||
+        options.card.skills.some(skill => [...skill.inputModes].some(mode => !allowedInputs.includes(mode)) || [...skill.outputModes].some(mode => !allowedOutputs.includes(mode)))) throw new Error("Advertise only supported input modes and text/plain output modes unless fileArtifacts is configured.");
     if ((options.pollIntervalMs ?? 250) < 1) throw new Error("pollIntervalMs must be positive.");
   }
   async getAgentCard(): Promise<AgentCard> { return structuredClone(this.options.card); }
@@ -132,6 +135,28 @@ export class DurableA2A implements A2ARequestHandler {
     return result;
   }
   private async refresh(id: string, scope: string): Promise<Task> {
+    const task = await this.refreshStored(id, scope);
+    if (!this.options.fileArtifacts || task.status?.state !== TaskState.TASK_STATE_COMPLETED) return task;
+    const extra = await this.options.fileArtifacts(decodeTask(jsonTask(task)));
+    if (!Array.isArray(extra) || extra.length > 4 || Buffer.byteLength(JSON.stringify(extra)) > 65_536)
+      throw new Error("Host file artifacts exceed the supported metadata bound.");
+    const origins = new Set(this.options.card.supportedInterfaces.map(item => new URL(item.url).origin));
+    const ids = new Set(task.artifacts.map(item => item.artifactId));
+    for (const artifact of extra) {
+      checkId(artifact.artifactId);
+      if (ids.has(artifact.artifactId) || !artifact.parts.length || artifact.parts.length > 4) throw new Error("Host file artifact identity or parts are invalid.");
+      ids.add(artifact.artifactId);
+      for (const part of artifact.parts) {
+        if (part.content?.$case !== "url" || !this.options.card.defaultOutputModes.includes(part.mediaType))
+          throw new Error("Host file artifacts require an advertised URL media type.");
+        const url = new URL(part.content.value);
+        if (!origins.has(url.origin) || !["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+          throw new Error("Host file artifacts must use a credential-free agent origin.");
+      }
+    }
+    return { ...task, artifacts: [...task.artifacts, ...extra.map(value => Artifact.fromJSON(Artifact.toJSON(value)))] };
+  }
+  private async refreshStored(id: string, scope: string): Promise<Task> {
     const record = await this.record(id, scope);
     const task = decodeTask(record.task);
     if (record.settledId === record.submissionId) return task;
