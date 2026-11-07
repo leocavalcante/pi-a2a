@@ -5,6 +5,9 @@ import { AgentCard, formatSSEEvent } from "@a2a-js/sdk";
 import { A2AError } from "@a2a-js/sdk/errors";
 import { JsonRpcTransportHandler, ServerCallContext, validateVersion, type A2ARequestHandler } from "@a2a-js/sdk/server";
 
+/** Suggested HTTP body ceiling for explicitly image-enabled hosts; default remains 64 KiB. */
+export const A2A_IMAGE_MAX_BODY_BYTES = 6 * 1024 * 1024;
+
 export interface HttpOptions {
   path?: string;
   /** Host-owned authentication. Return a stable identity, never the credential itself. */

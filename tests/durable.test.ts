@@ -34,6 +34,29 @@ test("official SDK client drives a real Durable submission and context follow-up
   assert.equal(f.faux.state.callCount, 2);
 });
 
+test("opt-in inline PNG is admitted once, retained as a bounded placeholder, and image changes conflict", async t => {
+  const f = await fixture({ images: true }); t.after(f.close);
+  const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1]);
+  const request = (id: string, bytes = png) => SendMessageRequest.fromJSON({ message: { messageId: id, role: "ROLE_USER", parts: [{ text: "Describe" }, { raw: bytes.toString("base64"), mediaType: "image/png" }] }, configuration: { returnImmediately: true, historyLength: 0 } });
+  const task = await f.client.sendMessage(request("photo"));
+  assert.ok(isTask(task));
+  assert.deepEqual(task.history, []);
+  const retained = await f.client.sendMessage(request("photo"));
+  assert.ok(isTask(retained)); assert.equal(retained.id, task.id);
+  await assert.rejects(f.client.sendMessage(request("photo", Buffer.concat([png, Buffer.from([2])]))), /message ID already belongs/);
+  assert.equal(f.faux.state.callCount, 1);
+});
+
+test("inline images remain opt-in and reject unsupported and invalid data", async t => {
+  const f = await fixture(); t.after(f.close);
+  await assert.rejects(f.client.sendMessage(SendMessageRequest.fromJSON({ message: { messageId: "image-off", role: "ROLE_USER", parts: [{ raw: Buffer.from([1]).toString("base64"), mediaType: "image/png" }] } })), /content|media/i);
+  const enabled = await fixture({ images: true }); t.after(enabled.close);
+  const request = (part: object) => SendMessageRequest.fromJSON({ message: { messageId: "bad-image", role: "ROLE_USER", parts: [part] } });
+  await assert.rejects(enabled.client.sendMessage(request({ raw: Buffer.from([1]).toString("base64"), mediaType: "image/png" })), /Invalid|image/i);
+  await assert.rejects(enabled.client.sendMessage(request({ url: "https://example.invalid/a.png", mediaType: "image/png" })), /content|media/i);
+  assert.equal(enabled.faux.state.callCount, 0);
+});
+
 test("concurrent identical message IDs admit once; changed text conflicts", async t => {
   const f = await fixture(); t.after(f.close);
   const replies = await Promise.all(Array.from({ length: 4 }, () => sendText(f.client, "Same", { messageId: "same-id" })));

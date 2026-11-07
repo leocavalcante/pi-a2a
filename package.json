@@ -1,6 +1,6 @@
 {
   "name": "pi-a2a",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "A2A communication for Pi Durable agents and Pi coding-agent sessions",
   "type": "module",
   "license": "MIT",

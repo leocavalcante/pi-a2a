@@ -3,16 +3,17 @@ import { setTimeout as delay } from "node:timers/promises";
 import type { Context, JsonValue } from "@earendil-works/chord";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { AssistantEntry, defineDocFamily, LiveDoc, type Conversation, type ConversationId, type Harness, type LiveState, type SubmissionId } from "@earendil-works/pi-durable";
-import { AgentCard, Message, Role, StreamResponse, Task, TaskState, type SendMessageRequest, type GetTaskRequest, type ListTasksRequest, type ListTasksResponse, type CancelTaskRequest, type SubscribeToTaskRequest } from "@a2a-js/sdk";
+import { AgentCard, Message, Role, StreamResponse, Task, TaskState, type SendMessageRequest, type GetTaskRequest, type ListTasksRequest, type ListTasksResponse, type CancelTaskRequest, type SubscribeToTaskRequest, TaskPushNotificationConfig, type GetTaskPushNotificationConfigRequest, type ListTaskPushNotificationConfigsRequest, type DeleteTaskPushNotificationConfigRequest, type ListTaskPushNotificationConfigsResponse } from "@a2a-js/sdk";
 import { ContentTypeNotSupportedError, PushNotificationNotSupportedError, RequestMalformedError, TaskNotCancelableError, TaskNotFoundError, UnsupportedOperationError } from "@a2a-js/sdk/errors";
 import type { A2ARequestHandler, ServerCallContext } from "@a2a-js/sdk/server";
 import { interrupted, terminal } from "./client.ts";
+import { DurablePush, type PushOptions } from "./push.ts";
 
 /** All adapter metadata is committed by the application's existing storage owner. */
 type TaskRecord = { scope: string; conversationId: number; submissionId: number; settledId: number; task: { [key: string]: JsonValue } | null };
 const Tasks = defineDocFamily<TaskRecord, null>({ kind: "pi-a2a.task", version: 1, scope: "session", family: true,
   initial: () => ({ scope: "", conversationId: 0, submissionId: 0, settledId: 0, task: null }), checkpointWhen: () => true });
-const Messages = defineDocFamily<{ taskId: string; text: string; textSha256?: string; contextId: string }, null>({ kind: "pi-a2a.message", version: 1, scope: "session", family: true,
+const Messages = defineDocFamily<{ taskId: string; text: string; textSha256?: string; inputSha256?: string; contextId: string }, null>({ kind: "pi-a2a.message", version: 1, scope: "session", family: true,
   initial: () => ({ taskId: "", text: "", contextId: "" }), checkpointWhen: () => true });
 const Owners = defineDocFamily<{ ids: string[]; contexts: Record<string, string> }, null>({ kind: "pi-a2a.owner", version: 1, scope: "session", family: true,
   initial: () => ({ ids: [], contexts: {} }), checkpointWhen: () => true });
@@ -51,16 +52,28 @@ export interface DurableA2AOptions {
   /** Application-defined interruption, never guessed from model prose. Defaults to COMPLETED. */
   classifyAnswer?: (answer: string) => TaskState;
   pollIntervalMs?: number;
+  /** Accept bounded inline JPEG/PNG parts. Defaults to false. */
+  images?: boolean;
+  /** Explicit callback trust. The host starts/stops the pump with its existing owner. */
+  push?: PushOptions;
 }
 
 /** A2A 1.0 request handler; the official SDK supplies the transport and wire codecs. */
 export class DurableA2A implements A2ARequestHandler {
   readonly context: Context;
+  private readonly push?: DurablePush;
+  startPush(): void { this.push?.start(); }
+  async close(): Promise<void> { await this.push?.close(); }
+  async flushPush(): Promise<void> { await this.push?.flush(); }
   constructor(readonly options: DurableA2AOptions) {
     this.context = options.context ?? BACKGROUND_CONTEXT;
-    if (options.card.capabilities?.pushNotifications || options.card.capabilities?.extendedAgentCard || options.card.capabilities?.extensions.length) throw new Error("This adapter does not implement push notifications, extended cards or protocol extensions.");
+    if (options.card.capabilities?.extendedAgentCard || options.card.capabilities?.extensions.length) throw new Error("This adapter does not implement extended cards or protocol extensions.");
+    if (Boolean(options.card.capabilities?.pushNotifications) !== Boolean(options.push)) throw new Error("Push capability requires explicit callback trust and lifecycle configuration.");
+    if (options.push) this.push = new DurablePush(options.harness, this.context, options.push, (id, scope) => this.refresh(id, scope));
+    const allowedInputs = options.images ? ["text/plain", "image/jpeg", "image/png"] : ["text/plain"];
     if (!options.card.defaultInputModes.length || !options.card.defaultOutputModes.length ||
-        [...options.card.defaultInputModes, ...options.card.defaultOutputModes, ...options.card.skills.flatMap(skill => [...skill.inputModes, ...skill.outputModes])].some(mode => mode !== "text/plain")) throw new Error("Advertise only the text/plain input/output modes this adapter implements.");
+        options.card.defaultInputModes.some(mode => !allowedInputs.includes(mode)) || options.card.defaultOutputModes.some(mode => mode !== "text/plain") ||
+        options.card.skills.some(skill => [...skill.inputModes].some(mode => !allowedInputs.includes(mode)) || [...skill.outputModes].some(mode => mode !== "text/plain"))) throw new Error("Advertise only supported input modes and text/plain output modes.");
     if ((options.pollIntervalMs ?? 250) < 1) throw new Error("pollIntervalMs must be positive.");
   }
   async getAgentCard(): Promise<AgentCard> { return structuredClone(this.options.card); }
@@ -185,10 +198,29 @@ export class DurableA2A implements A2ARequestHandler {
     const message = params.message;
     if (!message || message.role !== Role.ROLE_USER || !message.parts.length) malformed("Send a user message with text parts.");
     checkId(message.messageId);
-    if (message.parts.some(part => part.content?.$case !== "text" || (part.mediaType && part.mediaType !== "text/plain"))) throw new ContentTypeNotSupportedError();
-    const text = message.parts.map(part => part.content?.$case === "text" ? part.content.value : "").join("\n");
-    if (!text.trim() || Buffer.byteLength(text) > 8192) malformed("Text must contain 1–8192 UTF-8 bytes.");
-    if (params.configuration?.taskPushNotificationConfig) throw new PushNotificationNotSupportedError();
+    const textParts: string[] = [];
+    const images: { data: Buffer; mimeType: "image/jpeg" | "image/png" }[] = [];
+    let imageBytes = 0;
+    for (const part of message.parts) {
+      if (part.content?.$case === "text" && (!part.mediaType || part.mediaType === "text/plain")) { textParts.push(part.content.value); continue; }
+      if (!this.options.images || part.content?.$case !== "raw" || (part.mediaType !== "image/jpeg" && part.mediaType !== "image/png")) throw new ContentTypeNotSupportedError();
+      const data = part.content.value;
+      const jpeg = part.mediaType === "image/jpeg";
+      if (!Buffer.isBuffer(data) || data.length === 0 || data.length > 1_048_576 || (jpeg ? !(data[0] === 0xff && data[1] === 0xd8 && data.at(-2) === 0xff && data.at(-1) === 0xd9) : !(data.length >= 8 && data.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))))) malformed("Invalid or oversized inline image.");
+      imageBytes += data.length;
+      if (images.length >= 4 || imageBytes > 4 * 1_048_576) malformed("Too many or oversized inline images.");
+      images.push({ data: Buffer.from(data), mimeType: part.mediaType });
+    }
+    const text = textParts.join("\n");
+    if (Buffer.byteLength(text) > 8192 || (!text.trim() && images.length === 0)) malformed("Provide text of at most 8192 UTF-8 bytes or at least one image.");
+    const inputSha256 = createHash("sha256").update(JSON.stringify([text, images.map(image => [image.mimeType, image.data.toString("base64")]), message.contextId ?? null, message.taskId ?? null])).digest("hex");
+    const requestedPush = params.configuration?.taskPushNotificationConfig;
+    let pushConfig: TaskPushNotificationConfig | undefined;
+    if (requestedPush) {
+      if (!this.push) throw new PushNotificationNotSupportedError();
+      pushConfig = this.push.validate({ ...requestedPush, id: requestedPush.id || hash(message.messageId) });
+      if (requestedPush.taskId && requestedPush.taskId !== message.taskId || requestedPush.tenant && requestedPush.tenant !== params.tenant) malformed("Push configuration association does not match the message.");
+    }
     if (params.configuration?.acceptedOutputModes.length && !params.configuration.acceptedOutputModes.includes("text/plain")) throw new ContentTypeNotSupportedError();
     if (message.extensions.length || message.referenceTaskIds.length) throw new UnsupportedOperationError("Protocol extensions and referenceTaskIds are not implemented by this text adapter.");
     await this.adoptExisting(message.messageId, identity, scope);
@@ -196,7 +228,7 @@ export class DurableA2A implements A2ARequestHandler {
     const key = hash([scope, message.messageId]);
     const existing = await this.options.harness.snapshot(Messages, key, this.context);
     if (existing?.taskId) {
-      if (!sameText(existing, text) || (message.contextId && message.contextId !== existing.contextId) || (message.taskId && message.taskId !== existing.taskId)) malformed("This message ID already belongs to another message.");
+      if ((existing.inputSha256 ? existing.inputSha256 !== inputSha256 : images.length > 0 || !sameText(existing, text)) || (message.contextId && message.contextId !== existing.contextId) || (message.taskId && message.taskId !== existing.taskId)) malformed("This message ID already belongs to another message.");
       return existing.taskId;
     }
     let task: Task | undefined;
@@ -220,7 +252,7 @@ export class DurableA2A implements A2ARequestHandler {
     return this.options.harness.commit(async tx => {
       const receipt = await tx.doc(Messages, key, null);
       if (receipt.taskId) {
-        if (!sameText(receipt, text) || (message.contextId && receipt.contextId !== message.contextId) || (message.taskId && receipt.taskId !== message.taskId)) malformed("This message ID already belongs to another message.");
+        if ((receipt.inputSha256 ? receipt.inputSha256 !== inputSha256 : images.length > 0 || !sameText(receipt, text)) || (message.contextId && receipt.contextId !== message.contextId) || (message.taskId && receipt.taskId !== message.taskId)) malformed("This message ID already belongs to another message.");
         return receipt.taskId;
       }
       const owner = await tx.doc(Owners, scope, null);
@@ -229,16 +261,18 @@ export class DurableA2A implements A2ARequestHandler {
       if (binding.scope && (binding.scope !== scope || binding.conversationId !== conversation.id)) malformed("Context ownership changed.");
       const record = await tx.doc(Tasks, proposedTaskId, null);
       if (task && record.task && !interrupted(decodeTask(record.task))) throw new UnsupportedOperationError("The task is no longer awaiting input.");
-      const submissionId = await conversation.submit(tx, { type: "input", content: text, requestId: `pi-a2a:${key}` });
-      const input = Message.fromJSON({ messageId: message.messageId, contextId, taskId: proposedTaskId, role: "ROLE_USER", parts: [{ text, mediaType: "text/plain" }] });
+      const content = images.length ? [...(text ? [{ type: "text" as const, text }] : []), ...images.map(image => ({ type: "image" as const, data: image.data.toString("base64"), mimeType: image.mimeType }))] : text;
+      const submissionId = await conversation.submit(tx, { type: "input", content, requestId: `pi-a2a:${key}` });
+      const input = Message.fromJSON({ messageId: message.messageId, contextId, taskId: proposedTaskId, role: "ROLE_USER", parts: [...(text ? [{ text, mediaType: "text/plain" }] : []), ...images.map(image => ({ text: `[${image.mimeType} image attached]`, mediaType: "text/plain" }))] });
       const value = decodeTask(record.task ?? { id: proposedTaskId, contextId, metadata: { messageId: message.messageId } });
       value.history = [...value.history, input].slice(-50);
       value.status = { state: TaskState.TASK_STATE_SUBMITTED, timestamp: now(), message: undefined };
       record.scope = scope; record.conversationId = conversation.id; record.submissionId = submissionId; record.settledId = 0; record.task = jsonTask(value);
-      receipt.taskId = proposedTaskId; receipt.text = text; receipt.contextId = contextId;
+      receipt.taskId = proposedTaskId; receipt.text = text; receipt.inputSha256 = inputSha256; receipt.contextId = contextId;
       binding.scope = scope; binding.conversationId = conversation.id;
       owner.contexts[String(conversation.id)] = contextId;
       if (!owner.ids.includes(proposedTaskId)) owner.ids.push(proposedTaskId);
+      if (pushConfig) await this.requirePush().bind(tx, scope, { ...pushConfig, taskId: proposedTaskId });
       return proposedTaskId;
     }, this.context);
   }
@@ -246,6 +280,9 @@ export class DurableA2A implements A2ARequestHandler {
   async sendMessage(params: SendMessageRequest, context: ServerCallContext): Promise<Task> {
     const id = await this.admit(params, context);
     const { scope } = this.identity(context, params.tenant);
+    if (params.configuration?.taskPushNotificationConfig) await this.requirePush().put(scope, {
+      ...params.configuration.taskPushNotificationConfig, id: params.configuration.taskPushNotificationConfig.id || hash(params.message?.messageId), taskId: id,
+    });
     let value = await this.refresh(id, scope);
     while (!params.configuration?.returnImmediately && !terminal(value) && !interrupted(value)) {
       await this.pause(context);
@@ -293,6 +330,9 @@ export class DurableA2A implements A2ARequestHandler {
   async *sendMessageStream(params: SendMessageRequest, context: ServerCallContext): AsyncGenerator<StreamResponse> {
     if (!this.options.card.capabilities?.streaming) throw new UnsupportedOperationError();
     const id = await this.admit(params, context);
+    if (params.configuration?.taskPushNotificationConfig) await this.requirePush().put(this.identity(context, params.tenant).scope, {
+      ...params.configuration.taskPushNotificationConfig, id: params.configuration.taskPushNotificationConfig.id || hash(params.message?.messageId), taskId: id,
+    });
     yield* this.updates(id, context, params.configuration?.historyLength);
   }
   async *resubscribe(params: SubscribeToTaskRequest, context: ServerCallContext): AsyncGenerator<StreamResponse> {
@@ -333,10 +373,22 @@ export class DurableA2A implements A2ARequestHandler {
     const nextPageToken = remaining.length > pageSize && last ? Buffer.from(JSON.stringify({ filter, timestamp: last.status?.timestamp ?? "", id: last.id })).toString("base64url") : "";
     return { tasks: page.map(task => { const result = this.history(task, params.historyLength); if (!params.includeArtifacts) result.artifacts = []; return result; }), pageSize, totalSize: tasks.length, nextPageToken };
   }
-  async createTaskPushNotificationConfig(): Promise<never> { throw new PushNotificationNotSupportedError(); }
-  async getTaskPushNotificationConfig(): Promise<never> { throw new PushNotificationNotSupportedError(); }
-  async listTaskPushNotificationConfigs(): Promise<never> { throw new PushNotificationNotSupportedError(); }
-  async deleteTaskPushNotificationConfig(): Promise<never> { throw new PushNotificationNotSupportedError(); }
+  private requirePush(): DurablePush {
+    if (!this.push) throw new PushNotificationNotSupportedError();
+    return this.push;
+  }
+  async createTaskPushNotificationConfig(params: TaskPushNotificationConfig, context: ServerCallContext): Promise<TaskPushNotificationConfig> {
+    return this.requirePush().put(this.identity(context, params.tenant).scope, params);
+  }
+  async getTaskPushNotificationConfig(params: GetTaskPushNotificationConfigRequest, context: ServerCallContext): Promise<TaskPushNotificationConfig> {
+    return this.requirePush().get(this.identity(context, params.tenant).scope, params.taskId, params.id);
+  }
+  async listTaskPushNotificationConfigs(params: ListTaskPushNotificationConfigsRequest, context: ServerCallContext): Promise<ListTaskPushNotificationConfigsResponse> {
+    return this.requirePush().list(this.identity(context, params.tenant).scope, params.taskId, params.pageSize || 50, params.pageToken);
+  }
+  async deleteTaskPushNotificationConfig(params: DeleteTaskPushNotificationConfigRequest, context: ServerCallContext) {
+    return this.requirePush().delete(this.identity(context, params.tenant).scope, params.taskId, params.id);
+  }
 }
 
 export function createDurableA2A(options: DurableA2AOptions): DurableA2A { return new DurableA2A(options); }
