@@ -54,6 +54,33 @@ test("A2A push is delivered without a task reader or SSE observer, then deduplic
   assert.equal(f.faux.state.callCount, 1);
 });
 
+test("callback guard withholds both new payloads and exact saved retries across reopen", async t => {
+  const receiver = await callback(); t.after(receiver.close); receiver.code(503);
+  const directory = await mkdtemp(join(tmpdir(), "a2a-push-guard-")); t.after(() => rm(directory, { recursive: true }));
+  const database = join(directory, "agent.sqlite");
+  let withheld = true, checks = 0;
+  const push = { allowedOrigins: [receiver.origin], allowHttpLoopback: true, validatePayload: (value: unknown) => {
+    checks++;
+    assert.match(JSON.stringify(value), /Hello over A2A/);
+    if (withheld) throw new Error("Synthetic sensitive payload withheld.");
+  } };
+  const f = await fixture({ storage: await openNodeSqliteStorage(database), push }); t.after(f.close);
+  const task = await sendText(f.client, "Synthetic guarded notification", { messageId: "guarded-push" }); assert.ok(isTask(task));
+  await f.adapter.createTaskPushNotificationConfig(config(`${receiver.origin}/push`, task.id), owner);
+  await f.root.waitForIdle(context);
+  await f.adapter.flushPush(); assert.equal(receiver.calls.length, 0);
+  withheld = false;
+  await f.adapter.flushPush(); assert.equal(receiver.calls.length, 1);
+  await f.close(); await delay(1050);
+  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), push, answers: [] }); t.after(reopened.close);
+  withheld = true;
+  await reopened.adapter.flushPush(); assert.equal(receiver.calls.length, 1);
+  withheld = false; receiver.code(202);
+  await reopened.adapter.flushPush(); assert.equal(receiver.calls.length, 2);
+  assert.equal(receiver.calls[0].body, receiver.calls[1].body);
+  assert.equal(checks, 4); assert.equal(reopened.faux.state.callCount, 0);
+});
+
 test("push URL and authentication validation reject before model admission", async t => {
   const f = await fixture({ push: { allowedOrigins: ["https://callback.example.invalid"] } }); t.after(f.close);
   for (const url of ["http://127.0.0.1/private", "https://elsewhere.invalid/push", "https://user:pass@callback.example.invalid/push", "https://callback.example.invalid/push?credential=x"]) {

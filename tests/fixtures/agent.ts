@@ -17,6 +17,7 @@ export function card(url: string, images = false, files = false, documents = fal
 }
 export async function fixture(options: {
   answers?: string[]; tokensPerSecond?: number; storage?: Storage; registry?: Registry; retries?: number;
+  mesh?: DurableA2AOptions["mesh"]; whenBusy?: DurableA2AOptions["whenBusy"]; validateInput?: DurableA2AOptions["validateInput"]; clientHeaders?: () => HeadersInit;
   classifyAnswer?: DurableA2AOptions["classifyAnswer"]; http?: HttpOptions; images?: boolean; documents?: boolean; push?: DurableA2AOptions["push"]; fileArtifacts?: DurableA2AOptions["fileArtifacts"];
 } = {}) {
   const faux = fauxProvider({ tokensPerSecond: options.tokensPerSecond });
@@ -30,12 +31,12 @@ export async function fixture(options: {
   const root = await harness.root(context, { agent: { model: { provider: model.provider, modelId: model.id } } });
   const agentCard = card("http://127.0.0.1:1/a2a", options.images, Boolean(options.fileArtifacts), options.documents);
   if (options.push) agentCard.capabilities!.pushNotifications = true;
-  const adapter = createDurableA2A({ harness, card: agentCard, conversation: () => root, classifyAnswer: options.classifyAnswer, images: options.images, documents: options.documents, push: options.push, fileArtifacts: options.fileArtifacts, pollIntervalMs: 10 });
+  const adapter = createDurableA2A({ harness, card: agentCard, conversation: () => root, mesh: options.mesh, whenBusy: options.whenBusy, validateInput: options.validateInput, classifyAnswer: options.classifyAnswer, images: options.images, documents: options.documents, push: options.push, fileArtifacts: options.fileArtifacts, pollIntervalMs: 10 });
   const server = createA2AServer(adapter, options.http ?? { allowUnauthenticatedLoopback: true, ...(options.documents ? { maxBodyBytes: A2A_DOCUMENT_MAX_BODY_BYTES } : {}) });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   agentCard.supportedInterfaces[0].url = `${baseUrl}/a2a`;
-  const client = await connectAgent(baseUrl, { allowHttpLoopback: true });
+  const client = await connectAgent(baseUrl, { allowHttpLoopback: true, headers: options.clientHeaders });
   harness.resume();
   let closing: Promise<void> | undefined;
   const close = () => closing ??= (async () => {

@@ -84,7 +84,7 @@ test("configuration defaults to Pi's a2a directory and honors PI_A2A_CONFIG", as
 test("configuration permits only explicit targets and environment credential references", async t => {
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-config-")); t.after(() => rm(dir, { recursive: true }));
   const file = join(dir, "agents.json");
-  assert.deepEqual(await readAgentConfig(file), { agents: {} });
+  await assert.rejects(readAgentConfig(file), /Configuration|configuration/);
   await writeFile(file, JSON.stringify({ agents: { sample: { url: "https://example.invalid", bearerTokenEnv: "SYNTHETIC_A2A_CREDENTIAL" } } }));
   assert.ok((await readAgentConfig(file)).agents.sample);
   await writeFile(file, JSON.stringify({ agents: { sample: { url: "https://example.invalid", token: "Do not accept literal credentials" } } }));

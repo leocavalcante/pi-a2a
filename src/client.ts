@@ -26,6 +26,11 @@ const localErrors = {
   AUTHENTICATION_FAILED: "The configured A2A peer rejected authentication or access. Check its private credential reference and permissions.",
   UNTRUSTED_ORIGIN: "The Agent Card selected an origin that is not configured as trusted.",
   RESPONSE_TOO_LARGE: "A2A response exceeds the 2 MiB document limit. Request less history or a smaller result.",
+  TARGET_CHANGED: "The configured peer endpoint changed after this delegation began. Inspect its retained receipt before continuing.",
+  DELIVERY_UNCERTAIN: "An earlier send attempt has no confirmed receipt. It was not resubmitted; inspect the original message ID before taking further action.",
+  SENSITIVE_CONTENT: "Sensitive content withheld. No credential value was returned.",
+  SELF_DELEGATION: "Use this conversation directly rather than delegating to the same agent.",
+  STREAMING_UNAVAILABLE: "This peer does not support task subscriptions. Retrieve its retained task without resubmitting the request.",
 } as const;
 export class LocalA2AError extends Error {
   constructor(readonly code: keyof typeof localErrors) { super(localErrors[code]); }
@@ -141,6 +146,13 @@ export function safeError(error: unknown): { code: string; message: string } {
   if (error instanceof LocalA2AError) return { code: error.code, message: error.message };
   const allowed = ["TASK_NOT_FOUND", "TASK_NOT_CANCELABLE", "PUSH_NOTIFICATION_NOT_SUPPORTED", "UNSUPPORTED_OPERATION", "CONTENT_TYPE_NOT_SUPPORTED", "INVALID_AGENT_RESPONSE", "VERSION_NOT_SUPPORTED", "REQUEST_MALFORMED"];
   const reason = typeof error === "object" && error !== null && "reason" in error ? String(error.reason) : "";
+  const details = typeof error === "object" && error !== null && "data" in error && Array.isArray(error.data) ? error.data : [];
+  const info = details.find((value: unknown) => typeof value === "object" && value !== null &&
+    "@type" in value && value["@type"] === "type.googleapis.com/google.rpc.ErrorInfo" && "domain" in value && value.domain === "a2a-protocol.org" &&
+    "reason" in value && value.reason === reason) as { metadata?: Record<string, unknown> } | undefined;
+  const metadata = typeof error === "object" && error !== null && "metadata" in error && error.metadata ? error.metadata as Record<string, unknown> : info?.metadata;
+  if (reason === "UNSUPPORTED_OPERATION" && metadata?.input === "peer" && metadata.admission === "rejected" && metadata.busy === "true")
+    return { code: "PEER_BUSY", message: "The recipient is busy; this peer request was rejected before admission. No remote work was queued." };
   const code = allowed.includes(reason) ? reason : error instanceof Error && error.name === "AbortError" ? "WAIT_ABORTED" : "A2A_REQUEST_FAILED";
   return { code, message: "A2A request did not complete. Inspect the original message/task ID before retrying; local interruption does not cancel remote work." };
 }

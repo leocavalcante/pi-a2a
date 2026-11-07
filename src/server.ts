@@ -5,6 +5,8 @@ import { AgentCard, formatSSEEvent } from "@a2a-js/sdk";
 import { A2AError } from "@a2a-js/sdk/errors";
 import { JsonRpcTransportHandler, ServerCallContext, validateVersion, type A2ARequestHandler } from "@a2a-js/sdk/server";
 
+export { peerBearerAuth, peerName } from "./peers.ts";
+
 /** Suggested HTTP body ceiling for explicitly image-enabled hosts; default remains 64 KiB. */
 export const A2A_IMAGE_MAX_BODY_BYTES = 6 * 1024 * 1024;
 /** One 4 MiB document plus four 1 MiB images, base64 encoded. Defaults remain unchanged. */

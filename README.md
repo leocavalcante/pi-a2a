@@ -7,6 +7,8 @@ A2A communication for Pi Durable applications and Pi coding-agent sessions.
 - **Pi extension:** tools and `/a2a` commands for talking to configured Durable or non-Pi A2A agents.
 - **Durable tools:** let a Durable agent delegate to another A2A agent through the same client.
 
+The npm package name is `@leocavalcante/pi-a2a`; the unrelated unscoped `pi-a2a` package is not this project.
+
 MIT licensed. Built on the [official A2A JS SDK](https://github.com/a2aproject/a2a-js), not a handwritten replacement for its wire types or dispatch.
 
 ## Compatibility and scope
@@ -16,6 +18,33 @@ Node **22.19+**, Pi coding agent / Pi Durable **1.5.0**, official `@a2a-js/sdk` 
 The server exposes **JSON-RPC over HTTP**, Agent Card discovery, send/get/list tasks, cursor pagination, follow-ups, status/artifact streaming and subscription. The client negotiates **JSON-RPC or HTTP+JSON/REST** through the official SDK. It can talk to non-Pi implementations using those interfaces. gRPC and v0.3 compatibility are not enabled here. Authentication, supported media and capabilities still have to match.
 
 The Durable adapter accepts **text/plain**, up to **8192 UTF-8 bytes**. Opt-in `images: true` also accepts up to four inline JPEG/PNG images of at most 1 MiB each. It never fetches attachment URLs, opens host files or executes instructions from an Agent Card. Opt-in A2A 1.0 push notifications require an explicit callback-origin allowlist and application-owned pump lifecycle. Extended cards, protocol extensions and reference-task processing remain unsupported. Streaming reports task state, fixed progress descriptions, and committed final artifacts; it does not promise provider-token streaming or byte-for-byte replay of an old stream.
+
+## Private discovery and delegation
+
+Durable owners can discover and contact any registered A2A peer without hard-coded pairings, a coordinator Harness or a custom client. An ordinary A2A client submits its request to one agent; that agent chooses collaborators through tools and produces its normal A2A task/result. LabAgents is not required.
+
+Install `createA2ATools({self: "alpha", guard: guardPublication})` in the existing registry. Its generic tools are `a2a_agents` (live Agent Card roles, skills, media and streaming capabilities, with pagination), `a2a_send` (text delegation and optional waiting), and `a2a_get_task` (read/observe existing work). Discovery uses registered endpoints from the existing `AgentConfig`, not network scans. Cards and replies are remote data, never instructions or approval. The directory is re-read for each operation: registering another endpoint does not require workflow or prompt changes. Missing explicitly selected configuration is an error, not an empty directory.
+
+For trusted agents belonging to one human owner, use `peerBearerAuth(readOwnerToken, "alpha-owner")` and adapter options `mesh: {name: "alpha", owner: {userId: "alpha-owner", tenant: ""}}`. The host conversation resolver must accept only its owner and authenticated `peerName(identity.userId)` identities, returning its existing root. The helper authenticates each peer separately using `incomingBearerTokenFile` references in that host's directory, while outbound calls use `bearerTokenFile`/`bearerTokenEnv`. It never distributes the human owner's token or provider credentials. Protect non-A2A status/admin routes separately; a valid peer is not their owner.
+
+Peer requests receive authenticated caller provenance in model input and standard task metadata under `pi-a2a.peer`. Peers can retrieve only their own tasks and cannot adopt owner legacy receipts. The configured human owner may read/list its host's peer results (including task-bound file artifacts), but this does not permit cross-identity message replay or cancellation. This is a trusted, single-human-owner mesh, not isolation between unrelated users sharing one conversation.
+
+**Busy recipients:** peer admission requires an idle existing conversation, checked in the admission commit. A busy recipient returns standard `UNSUPPORTED_OPERATION` ErrorInfo with `metadata: {input: "peer", admission: "rejected", busy: "true"}`. No peer input is queued. This prevents synchronous cross-agent wait cycles on single-conversation owners without aborting active work. Owner messages retain their normal follow-up behavior or the host's explicit `whenBusy: "steer"` setting. A rejected peer request can be attempted later under the same identity; this is distinct from an uncertain send.
+
+Send tools retain their target, attempt marker, acknowledgement and bounded result in native Durable task memos. Reopening after a confirmed acknowledgement resumes task observation rather than sending again; an attempted send without an acknowledgement returns `DELIVERY_UNCERTAIN` and is never automatically resubmitted, even for peers that do not deduplicate. Endpoint changes stop pending observation under that alias. Advertised streaming uses task subscriptions and an authoritative final task read; a failed advertised stream is not replaced with polling. Non-streaming peers retain ordinary GetTask observation. Local cancellation never calls remote CancelTask.
+
+Tool outputs preserve bounded text plus credential-free, approved-origin URL artifact references; files are not downloaded. Original artifact ownership/authentication remains with the producing agent. Host guards scan outgoing/incoming projections; declared messaging credential values are additionally withheld by the shared tools. No private profile or transcript is automatically forwarded, no domain permission is changed, and no remote model usage is fabricated or counted twice.
+
+`examples/mesh/provision.mjs` prepares separate, directional peer credentials and per-agent configuration outside Git. It preserves existing keys on rerun and adds new registered agents without rotating older pairs. It performs no networking, live deployment, provider login copy or model call:
+
+```sh
+npm run build
+node examples/mesh/provision.mjs examples/mesh/directory.example.json /private/existing-parent/peers /auth/a2a
+```
+
+The endpoint directory contains only registered URLs and transport trust options. Copy each generated agent's private directory to that agent's designated credential location during a separately authorized deployment, set `PI_A2A_CONFIG=/auth/a2a/agents.json`, and grant only the required private HTTPS connectivity. Do not mount every agent's credentials into every owner or weaken TLS/origin checks.
+
+`validateInput` allows a synchronous, isolated model-input guard after document extraction but before admission. `push.validatePayload` guards actual callback JSON, including a pending body recovered after restart. These callbacks can withhold but cannot rewrite immutable input or callback bytes.
 
 ## Inline photos and durable push
 
@@ -141,7 +170,7 @@ The extension does not automatically copy the session transcript to a remote age
 Install from this repository and build it with `npm run build`. Import from `pi-a2a/client`:
 
 ```ts
-import { connectAgent, isTask, newMessageId, sendText, waitForTask } from "pi-a2a/client";
+import { connectAgent, isTask, newMessageId, sendText, waitForTask } from "@leocavalcante/pi-a2a/client";
 
 const client = await connectAgent("https://agent.example.com", {
   headers: () => ({ Authorization: `Bearer ${process.env.REMOTE_A2A_TOKEN}` }),
@@ -159,8 +188,8 @@ The application must already own its Harness and single-writer lock. Do **not** 
 
 ```ts
 import { AgentCard } from "@a2a-js/sdk";
-import { createDurableA2A } from "pi-a2a/durable";
-import { a2aHttpHandler, bearerAuth } from "pi-a2a/server";
+import { createDurableA2A } from "@leocavalcante/pi-a2a/durable";
+import { a2aHttpHandler, bearerAuth } from "@leocavalcante/pi-a2a/server";
 
 const card = AgentCard.fromJSON({
   name: "My agent",
@@ -223,11 +252,11 @@ When replacing an older transport, the host may supply `existingSubmission(messa
 To give a Durable agent outbound A2A tools:
 
 ```ts
-import { createA2ATools } from "pi-a2a/durable";
+import { createA2ATools } from "@leocavalcante/pi-a2a/durable";
 registry.install(createA2ATools()); // reads the same explicit machine-local config
 ```
 
-Outbound sends are deliberately not replay-safe: arbitrary A2A peers need not deduplicate message IDs. A crash/disconnect can leave the outcome uncertain; inspect the original task or remote receipts before retrying. Task reads are replay-safe. Remote model usage is not standardized by A2A and is not fabricated as zero or added twice to the caller's usage.
+Outbound tools use replay-safe execution with native memos: a confirmed task resumes observation, while an unacknowledged attempted send is never automatically repeated. This does not assume arbitrary peers deduplicate message IDs or make their external effects exactly once. Inspect retained identities after uncertain outcomes. Remote model usage is not standardized by A2A and is not fabricated as zero or added twice to the caller's usage.
 
 ## Model-free runnable example
 
@@ -239,6 +268,12 @@ npm run example
 This serves a scripted local agent at `http://127.0.0.1:7777`, using SQLite under `./data/`. It makes **no provider requests**. Try `/a2a send demo Hello` from Pi with the configuration above. `DEMO_DATA_DIR` and `PORT` change its private directory and loopback port. An exclusive owner lock fails closed with exit 73; after a hard crash, verify the old process is gone before removing its stale `demo.owner`. SIGTERM closes the owner without durably canceling admitted work.
 
 A real application supplies its own models, prompts, tools, credentials, environment and approval policy. Neither a working directory nor A2A is a sandbox.
+
+## npm publication
+
+The public package is `@leocavalcante/pi-a2a`. Its initial publication requires the owner's interactive npm login/2FA and `npm publish --access public --provenance=false`; never add an npm token secret to CI. Once the package exists, configure its trusted publisher as GitHub owner `leocavalcante`, repository `pi-a2a`, workflow `publish.yml`, with no environment. Select npm's two-factor authentication/disallow-tokens policy and increment package/lockfile versions before the next release.
+
+`.github/workflows/publish.yml` is manually dispatched on `main`, validates/builds/tests the scoped package, and publishes using GitHub OIDC with provenance. The first interactive bootstrap does not prove OIDC; verify the exact future workflow run and registry version before claiming trusted publication. Git pushes and deployment do not imply registry publication.
 
 ## Development and verification
 

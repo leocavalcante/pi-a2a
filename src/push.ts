@@ -10,6 +10,8 @@ export interface PushOptions {
   allowedOrigins: string[];
   /** Explicit test/development exception only. */
   allowHttpLoopback?: boolean;
+  /** Read-only synchronous validation of actual callback JSON, including exact saved retries. Throw to withhold. */
+  validatePayload?: (payload: unknown) => void;
 }
 type Saved = { scope: string; taskId: string; config: { [key: string]: JsonValue }; delivered: string;
   pending: string; body: string; attempts: number; next: number };
@@ -124,6 +126,7 @@ export class DurablePush {
       // Persist intent before the external effect; retry uses the identical body.
       const body = saved.pending ? saved.body : JSON.stringify(StreamResponse.toJSON({ payload: { $case: "task", value: { ...task, history: [] } } }));
       const pending = saved.pending || revision;
+      try { this.options.validatePayload?.(JSON.parse(body)); } catch { continue; }
       await this.harness.commit(async tx => {
         const current = (await tx.doc(Registry, "callbacks", null)).items[key];
         if (current && hash(current.config) === hash(saved.config)) { current.pending = pending; current.body = body; }

@@ -9,6 +9,8 @@ export interface AgentTarget {
   allowedOrigins?: string[];
   bearerTokenEnv?: string;
   bearerTokenFile?: string;
+  /** Host-only credential reference authenticating this peer's incoming requests. Never part of discovery output. */
+  incomingBearerTokenFile?: string;
 }
 export interface AgentConfig { agents: Record<string, AgentTarget> }
 export async function defaultConfigPath() {
@@ -17,13 +19,14 @@ export async function defaultConfigPath() {
   return join(homedir(), CONFIG_DIR_NAME, "a2a", "agents.json");
 }
 export async function readAgentConfig(file?: string): Promise<AgentConfig> {
+  const explicit = file !== undefined || process.env.PI_A2A_CONFIG !== undefined;
   file ??= await defaultConfigPath();
   let text: string;
   try {
     if ((await stat(file)).size > 65_536) throw new Error();
     text = await readFile(file, "utf8");
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { agents: {} };
+    if (!explicit && (error as NodeJS.ErrnoException).code === "ENOENT") return { agents: {} };
     throw new LocalA2AError("CONFIGURATION_UNREADABLE");
   }
   try {
@@ -31,7 +34,7 @@ export async function readAgentConfig(file?: string): Promise<AgentConfig> {
     if (!value || Object.keys(value).join() !== "agents" || !value.agents || typeof value.agents !== "object" || Array.isArray(value.agents)) throw new Error();
     for (const [name, target] of Object.entries(value.agents) as [string, AgentTarget][]) {
       if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name) || !target || typeof target !== "object" || Array.isArray(target)) throw new Error();
-      if (Object.keys(target).some(key => !["url", "allowHttpLoopback", "allowedOrigins", "bearerTokenEnv", "bearerTokenFile"].includes(key))) throw new Error();
+      if (Object.keys(target).some(key => !["url", "allowHttpLoopback", "allowedOrigins", "bearerTokenEnv", "bearerTokenFile", "incomingBearerTokenFile"].includes(key))) throw new Error();
       if (typeof target.url !== "string" || (target.allowHttpLoopback !== undefined && typeof target.allowHttpLoopback !== "boolean")) throw new Error();
       endpoint(target.url, target.allowHttpLoopback);
       if (target.allowedOrigins !== undefined) {
@@ -40,12 +43,21 @@ export async function readAgentConfig(file?: string): Promise<AgentConfig> {
       }
       if (target.bearerTokenEnv !== undefined && !/^[A-Z_][A-Z0-9_]{0,127}$/.test(target.bearerTokenEnv)) throw new Error();
       if (target.bearerTokenFile !== undefined && (typeof target.bearerTokenFile !== "string" || !isAbsolute(target.bearerTokenFile) || target.bearerTokenEnv !== undefined)) throw new Error();
+      if (target.incomingBearerTokenFile !== undefined && (typeof target.incomingBearerTokenFile !== "string" || !isAbsolute(target.incomingBearerTokenFile))) throw new Error();
     }
     return value;
   } catch { throw new LocalA2AError("INVALID_CONFIGURATION"); }
 }
+export async function credentialFile(file: string): Promise<string> {
+  try {
+    if ((await stat(file)).size > 16_384) throw new Error();
+    const token = (await readFile(file, "utf8")).trim();
+    if (!token || /[\r\n]/.test(token)) throw new Error();
+    return token;
+  } catch { throw new LocalA2AError("CREDENTIAL_MISSING"); }
+}
 export async function configuredAgent(name: string, config: AgentConfig, signal?: AbortSignal) {
-  const target = Object.hasOwn(config.agents, name) ? config.agents[name] : undefined;
+  const target = Object.hasOwn(config.agents, name) ? structuredClone(config.agents[name]) : undefined;
   if (!target) throw new LocalA2AError("AGENT_NOT_CONFIGURED");
   const options: ConnectionOptions = {
     signal,
@@ -54,10 +66,8 @@ export async function configuredAgent(name: string, config: AgentConfig, signal?
     headers: target.bearerTokenEnv || target.bearerTokenFile ? async () => {
       let token: string | undefined;
       try {
-        if (target.bearerTokenFile) {
-          if ((await stat(target.bearerTokenFile)).size > 16_384) throw new Error();
-          token = (await readFile(target.bearerTokenFile, "utf8")).trim();
-        } else token = process.env[target.bearerTokenEnv!];
+        if (target.bearerTokenFile) token = await credentialFile(target.bearerTokenFile);
+        else token = process.env[target.bearerTokenEnv!];
       } catch { throw new LocalA2AError("CREDENTIAL_MISSING"); }
       if (!token || /[\r\n]/.test(token)) throw new LocalA2AError("CREDENTIAL_MISSING");
       return { Authorization: `Bearer ${token}` };

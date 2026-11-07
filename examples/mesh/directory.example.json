@@ -1,0 +1,6 @@
+{
+  "agents": {
+    "alpha": { "url": "https://alpha.example.invalid" },
+    "beta": { "url": "https://beta.example.invalid" }
+  }
+}
