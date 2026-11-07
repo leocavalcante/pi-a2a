@@ -7,6 +7,8 @@ import { JsonRpcTransportHandler, ServerCallContext, validateVersion, type A2ARe
 
 /** Suggested HTTP body ceiling for explicitly image-enabled hosts; default remains 64 KiB. */
 export const A2A_IMAGE_MAX_BODY_BYTES = 6 * 1024 * 1024;
+/** One 4 MiB document plus four 1 MiB images, base64 encoded. Defaults remain unchanged. */
+export const A2A_DOCUMENT_MAX_BODY_BYTES = 12 * 1024 * 1024;
 
 export interface HttpOptions {
   path?: string;

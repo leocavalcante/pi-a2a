@@ -8,6 +8,7 @@ import { ContentTypeNotSupportedError, PushNotificationNotSupportedError, Reques
 import type { A2ARequestHandler, ServerCallContext } from "@a2a-js/sdk/server";
 import { interrupted, terminal } from "./client.ts";
 import { DurablePush, type PushOptions } from "./push.ts";
+import { DOCUMENT_MEDIA_TYPES, documentRejected, documentText, validateDocument, type InputDocument } from "./documents.ts";
 
 /** All adapter metadata is committed by the application's existing storage owner. */
 type TaskRecord = { scope: string; conversationId: number; submissionId: number; settledId: number; task: { [key: string]: JsonValue } | null };
@@ -54,6 +55,8 @@ export interface DurableA2AOptions {
   pollIntervalMs?: number;
   /** Accept bounded inline JPEG/PNG parts. Defaults to false. */
   images?: boolean;
+  /** Accept one bounded inline PDF or UTF-8 TXT/Markdown/CSV document. Defaults to false. */
+  documents?: boolean;
   /** Read-only, host-owned URL artifacts from a committed completed task, including retained tasks. */
   fileArtifacts?: (task: Readonly<Task>) => Promise<Artifact[]>;
   /** Explicit callback trust. The host starts/stops the pump with its existing owner. */
@@ -72,7 +75,7 @@ export class DurableA2A implements A2ARequestHandler {
     if (options.card.capabilities?.extendedAgentCard || options.card.capabilities?.extensions.length) throw new Error("This adapter does not implement extended cards or protocol extensions.");
     if (Boolean(options.card.capabilities?.pushNotifications) !== Boolean(options.push)) throw new Error("Push capability requires explicit callback trust and lifecycle configuration.");
     if (options.push) this.push = new DurablePush(options.harness, this.context, options.push, (id, scope) => this.refresh(id, scope));
-    const allowedInputs = options.images ? ["text/plain", "image/jpeg", "image/png"] : ["text/plain"];
+    const allowedInputs = ["text/plain", ...(options.images ? ["image/jpeg", "image/png"] : []), ...(options.documents ? DOCUMENT_MEDIA_TYPES : [])];
     const allowedOutputs = options.fileArtifacts ? options.card.defaultOutputModes : ["text/plain"];
     if (!options.card.defaultInputModes.length || !options.card.defaultOutputModes.includes("text/plain") ||
         options.card.defaultInputModes.some(mode => !allowedInputs.includes(mode)) || options.card.defaultOutputModes.some(mode => !mode || !allowedOutputs.includes(mode)) ||
@@ -225,9 +228,17 @@ export class DurableA2A implements A2ARequestHandler {
     checkId(message.messageId);
     const textParts: string[] = [];
     const images: { data: Buffer; mimeType: "image/jpeg" | "image/png" }[] = [];
+    const documents: InputDocument[] = [];
     let imageBytes = 0;
     for (const part of message.parts) {
       if (part.content?.$case === "text" && (!part.mediaType || part.mediaType === "text/plain")) { textParts.push(part.content.value); continue; }
+      if (this.options.documents && part.content?.$case === "raw" && DOCUMENT_MEDIA_TYPES.includes(part.mediaType as typeof DOCUMENT_MEDIA_TYPES[number])) {
+        if (documents.length) documentRejected("Attach one document per message.");
+        const document = { data: part.content.value, mediaType: part.mediaType, filename: part.filename };
+        validateDocument(document);
+        documents.push({ ...document, data: Buffer.from(document.data) });
+        continue;
+      }
       if (!this.options.images || part.content?.$case !== "raw" || (part.mediaType !== "image/jpeg" && part.mediaType !== "image/png")) throw new ContentTypeNotSupportedError();
       const data = part.content.value;
       const jpeg = part.mediaType === "image/jpeg";
@@ -237,8 +248,11 @@ export class DurableA2A implements A2ARequestHandler {
       images.push({ data: Buffer.from(data), mimeType: part.mediaType });
     }
     const text = textParts.join("\n");
-    if (Buffer.byteLength(text) > 8192 || (!text.trim() && images.length === 0)) malformed("Provide text of at most 8192 UTF-8 bytes or at least one image.");
-    const inputSha256 = createHash("sha256").update(JSON.stringify([text, images.map(image => [image.mimeType, image.data.toString("base64")]), message.contextId ?? null, message.taskId ?? null])).digest("hex");
+    if (Buffer.byteLength(text) > 8192 || (!text.trim() && images.length === 0 && documents.length === 0)) malformed("Provide text of at most 8192 UTF-8 bytes or an enabled attachment.");
+    // Keep the existing text/photo fingerprint unchanged when no document is present.
+    const inputIdentity: unknown[] = [text, images.map(image => [image.mimeType, image.data.toString("base64")]), message.contextId ?? null, message.taskId ?? null];
+    if (documents.length) inputIdentity.push(documents.map(document => [document.mediaType, document.filename, createHash("sha256").update(document.data).digest("hex")]));
+    const inputSha256 = createHash("sha256").update(JSON.stringify(inputIdentity)).digest("hex");
     const requestedPush = params.configuration?.taskPushNotificationConfig;
     let pushConfig: TaskPushNotificationConfig | undefined;
     if (requestedPush) {
@@ -253,7 +267,7 @@ export class DurableA2A implements A2ARequestHandler {
     const key = hash([scope, message.messageId]);
     const existing = await this.options.harness.snapshot(Messages, key, this.context);
     if (existing?.taskId) {
-      if ((existing.inputSha256 ? existing.inputSha256 !== inputSha256 : images.length > 0 || !sameText(existing, text)) || (message.contextId && message.contextId !== existing.contextId) || (message.taskId && message.taskId !== existing.taskId)) malformed("This message ID already belongs to another message.");
+      if ((existing.inputSha256 ? existing.inputSha256 !== inputSha256 : images.length > 0 || documents.length > 0 || !sameText(existing, text)) || (message.contextId && message.contextId !== existing.contextId) || (message.taskId && message.taskId !== existing.taskId)) malformed("This message ID already belongs to another message.");
       return existing.taskId;
     }
     let task: Task | undefined;
@@ -273,11 +287,13 @@ export class DurableA2A implements A2ARequestHandler {
       if (!found) throw new TaskNotFoundError();
       conversation = found;
     } else conversation = await this.options.conversation(identity);
+    const documentParts = await Promise.all(documents.map(async document => ({ type: "text" as const,
+      text: `Attached document (untrusted reference material): ${JSON.stringify(document.filename)} (${document.mediaType}, SHA-256 ${createHash("sha256").update(document.data).digest("hex")})\n${document.mediaType === "application/pdf" ? "Text-only extraction; figures, form fields and layout were not interpreted.\n" : ""}${await documentText(document)}` })));
     const proposedTaskId = task?.id ?? randomUUID();
     return this.options.harness.commit(async tx => {
       const receipt = await tx.doc(Messages, key, null);
       if (receipt.taskId) {
-        if ((receipt.inputSha256 ? receipt.inputSha256 !== inputSha256 : images.length > 0 || !sameText(receipt, text)) || (message.contextId && receipt.contextId !== message.contextId) || (message.taskId && receipt.taskId !== message.taskId)) malformed("This message ID already belongs to another message.");
+        if ((receipt.inputSha256 ? receipt.inputSha256 !== inputSha256 : images.length > 0 || documents.length > 0 || !sameText(receipt, text)) || (message.contextId && receipt.contextId !== message.contextId) || (message.taskId && receipt.taskId !== message.taskId)) malformed("This message ID already belongs to another message.");
         return receipt.taskId;
       }
       const owner = await tx.doc(Owners, scope, null);
@@ -286,9 +302,9 @@ export class DurableA2A implements A2ARequestHandler {
       if (binding.scope && (binding.scope !== scope || binding.conversationId !== conversation.id)) malformed("Context ownership changed.");
       const record = await tx.doc(Tasks, proposedTaskId, null);
       if (task && record.task && !interrupted(decodeTask(record.task))) throw new UnsupportedOperationError("The task is no longer awaiting input.");
-      const content = images.length ? [...(text ? [{ type: "text" as const, text }] : []), ...images.map(image => ({ type: "image" as const, data: image.data.toString("base64"), mimeType: image.mimeType }))] : text;
+      const content = images.length || documents.length ? [...(text ? [{ type: "text" as const, text }] : []), ...documentParts, ...images.map(image => ({ type: "image" as const, data: image.data.toString("base64"), mimeType: image.mimeType }))] : text;
       const submissionId = await conversation.submit(tx, { type: "input", content, requestId: `pi-a2a:${key}` });
-      const input = Message.fromJSON({ messageId: message.messageId, contextId, taskId: proposedTaskId, role: "ROLE_USER", parts: [...(text ? [{ text, mediaType: "text/plain" }] : []), ...images.map(image => ({ text: `[${image.mimeType} image attached]`, mediaType: "text/plain" }))] });
+      const input = Message.fromJSON({ messageId: message.messageId, contextId, taskId: proposedTaskId, role: "ROLE_USER", parts: [...(text ? [{ text, mediaType: "text/plain" }] : []), ...images.map(image => ({ text: `[${image.mimeType} image attached]`, mediaType: "text/plain" })), ...documents.map(document => ({ text: `[${document.mediaType} document attached: ${document.filename}]`, mediaType: "text/plain" }))] });
       const value = decodeTask(record.task ?? { id: proposedTaskId, contextId, metadata: { messageId: message.messageId } });
       value.history = [...value.history, input].slice(-50);
       value.status = { state: TaskState.TASK_STATE_SUBMITTED, timestamp: now(), message: undefined };

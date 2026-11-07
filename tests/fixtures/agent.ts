@@ -5,19 +5,19 @@ import { createModels, fauxAssistantMessage, fauxProvider, fauxText } from "@ear
 import { createRegistry, Harness, MemoryStorage, type Registry, type Storage } from "@earendil-works/pi-durable";
 import { AgentCard } from "@a2a-js/sdk";
 import { createDurableA2A, type DurableA2AOptions } from "../../src/durable.ts";
-import { createA2AServer, type HttpOptions } from "../../src/server.ts";
+import { createA2AServer, A2A_DOCUMENT_MAX_BODY_BYTES, type HttpOptions } from "../../src/server.ts";
 import { connectAgent } from "../../src/client.ts";
 
 export const context = BACKGROUND_CONTEXT;
-export function card(url: string, images = false, files = false) {
+export function card(url: string, images = false, files = false, documents = false) {
   return AgentCard.fromJSON({ name: "Test agent", description: "Synthetic local test agent", version: "0.1.0",
     supportedInterfaces: [{ url, protocolBinding: "JSONRPC", protocolVersion: "1.0" }],
-    capabilities: { streaming: true }, defaultInputModes: images ? ["text/plain", "image/jpeg", "image/png"] : ["text/plain"], defaultOutputModes: files ? ["text/plain", "image/png", "image/jpeg", "image/webp"] : ["text/plain"],
+    capabilities: { streaming: true }, defaultInputModes: ["text/plain", ...(images ? ["image/jpeg", "image/png"] : []), ...(documents ? ["application/pdf", "text/markdown", "text/csv"] : [])], defaultOutputModes: files ? ["text/plain", "image/png", "image/jpeg", "image/webp"] : ["text/plain"],
     skills: [{ id: "reply", name: "Reply", description: "Reply to synthetic test messages", tags: ["test"] }] });
 }
 export async function fixture(options: {
   answers?: string[]; tokensPerSecond?: number; storage?: Storage; registry?: Registry; retries?: number;
-  classifyAnswer?: DurableA2AOptions["classifyAnswer"]; http?: HttpOptions; images?: boolean; push?: DurableA2AOptions["push"]; fileArtifacts?: DurableA2AOptions["fileArtifacts"];
+  classifyAnswer?: DurableA2AOptions["classifyAnswer"]; http?: HttpOptions; images?: boolean; documents?: boolean; push?: DurableA2AOptions["push"]; fileArtifacts?: DurableA2AOptions["fileArtifacts"];
 } = {}) {
   const faux = fauxProvider({ tokensPerSecond: options.tokensPerSecond });
   faux.setResponses((options.answers ?? ["Hello over A2A"]).map(answer => fauxAssistantMessage([fauxText(answer)])));
@@ -28,10 +28,10 @@ export async function fixture(options: {
     settings: { compaction: { enabled: false }, retry: { maxRetries: options.retries ?? 0, baseDelayMs: 1 }, afterFailedRun: "withdraw" } }, context);
   const model = faux.getModel();
   const root = await harness.root(context, { agent: { model: { provider: model.provider, modelId: model.id } } });
-  const agentCard = card("http://127.0.0.1:1/a2a", options.images, Boolean(options.fileArtifacts));
+  const agentCard = card("http://127.0.0.1:1/a2a", options.images, Boolean(options.fileArtifacts), options.documents);
   if (options.push) agentCard.capabilities!.pushNotifications = true;
-  const adapter = createDurableA2A({ harness, card: agentCard, conversation: () => root, classifyAnswer: options.classifyAnswer, images: options.images, push: options.push, fileArtifacts: options.fileArtifacts, pollIntervalMs: 10 });
-  const server = createA2AServer(adapter, options.http ?? { allowUnauthenticatedLoopback: true });
+  const adapter = createDurableA2A({ harness, card: agentCard, conversation: () => root, classifyAnswer: options.classifyAnswer, images: options.images, documents: options.documents, push: options.push, fileArtifacts: options.fileArtifacts, pollIntervalMs: 10 });
+  const server = createA2AServer(adapter, options.http ?? { allowUnauthenticatedLoopback: true, ...(options.documents ? { maxBodyBytes: A2A_DOCUMENT_MAX_BODY_BYTES } : {}) });
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   agentCard.supportedInterfaces[0].url = `${baseUrl}/a2a`;

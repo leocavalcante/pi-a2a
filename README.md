@@ -26,6 +26,16 @@ These server features are opt-in; existing text-only applications retain their b
 - Standard configuration CRUD and `SendMessage.configuration.taskPushNotificationConfig` are implemented. Admission saves its initial configuration in the same commit. The pump observes committed actionable states even without an HTTP/SSE task observer. Delivery intent is stored before POST; retry keeps the exact body, exponential backoff and acknowledgement across SQLite reopen. The body is the official SDK's A2A 1.0 `StreamResponse` JSON, MIME `application/a2a+json`.
 - Delivery is at least once, not proof of a notification appearing or being read. A receiver must authenticate, validate task/context identity, deduplicate committed revisions and keep notification content private. `INPUT_REQUIRED` and `AUTH_REQUIRED` must come from explicit application classification, never guesses from model prose. Ordinary questions can also arrive in completed answer text.
 
+## Inline documents
+
+Set `documents: true`, advertise `application/pdf`, `text/plain`, `text/markdown` and `text/csv`, and explicitly mount the handler with `maxBodyBytes: A2A_DOCUMENT_MAX_BODY_BYTES` (12 MiB). The default handler limit remains 64 KiB, and document inputs stay disabled unless opted in. Standard A2A parts use `{raw: BASE64, mediaType: "application/pdf", filename: "document.pdf"}`; attachment URLs are never fetched.
+
+A message may contain one document alongside its caption and existing photo allowance. PDFs are limited to 4 MiB, 32 pages and 128 KiB of extracted UTF-8 text; TXT/Markdown/CSV files are nonempty UTF-8 and at most 128 KiB. Extraction runs locally through pinned PDF.js/unpdf in short-lived workers, at most two concurrently, with a 15-second deadline and V8 heap limits. No provider upload, embedded script execution, OCR, visual/layout interpretation or automatic truncation is performed. Locked, malformed, oversized and scanned/blank-page PDFs are rejected before model admission.
+
+The existing Harness receives page-labeled extracted text as untrusted reference material, not a fabricated file path or the PDF's base64. Task history contains only a bounded attachment description. Original bytes, MIME type, filename and conversation/task associations are bound to the immutable receipt; an identical retry deduplicates across reopen before parsing again. Text/photo-only receipt fingerprints stay backward-compatible.
+
+Document decoding failures use standard `CONTENT_TYPE_NOT_SUPPORTED` ErrorInfo with `metadata: {input: "document", admission: "rejected"}`. Clients may restore a **fresh** attempt's draft after that explicit rejection. A later failed retry does not prove whether an earlier uncertain attempt was admitted; never automatically resend or replace its identity.
+
 ## Host-owned file artifacts
 
 An application can opt into `fileArtifacts: async task => artifacts` and advertise its supported output MIME types alongside `text/plain`. The callback receives an isolated copy of an authenticated, committed completed task, including on reads of older retained tasks. It must be read-only: no new model request, generation, upload or approval. The original text answer, status timestamp and persisted task remain unchanged.
