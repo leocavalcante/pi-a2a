@@ -55,12 +55,14 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json && tsc -p tests && tsc -p examples",
+    "lint": "prettier --check .",
+    "format": "prettier --write .",
     "test": "bun run test:bun && bun run test:node",
     "test:bun": "bun run build && bun test --timeout 30000",
     "test:node": "node --import jiti/register --test --test-timeout=30000 --test-concurrency=1 tests/*.node-test.ts",
     "changelog": "git-cliff --output CHANGELOG.md",
     "check:package": "bun run build && bun run changelog && publint && node .github/scripts/check-package.mjs",
-    "verify": "bun run check && bun run test && bun run check:package && bun audit --audit-level=high",
+    "verify": "bun run lint && bun run check && bun run test && bun run check:package && bun audit --audit-level=high",
     "example": "node --import jiti/register examples/echo.ts",
     "prepack": "bun run build"
   },
@@ -104,6 +106,7 @@
     "express": "5.1.0",
     "git-cliff": "2.14.2",
     "jiti": "2.7.0",
+    "prettier": "3.9.10",
     "publint": "0.3.25",
     "semantic-release": "25.0.9",
     "typebox": "1.4.4",
