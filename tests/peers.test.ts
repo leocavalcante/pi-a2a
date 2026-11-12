@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxToolCall, type TranscriptContext } from "@earendil-works/pi-ai";
 import { Artifact, ListTasksRequest, SendMessageRequest } from "@a2a-js/sdk";
 import { connectAgent, isTask, safeError, sendText, TaskState, textOf, waitForTask } from "../src/client.ts";
-import { configuredAgent } from "../src/config.ts";
 import { discoverAgents, guardPeerData } from "../src/peers.ts";
 import { fixture } from "./fixtures/agent.ts";
 import { deferred, mesh } from "./fixtures/mesh.ts";

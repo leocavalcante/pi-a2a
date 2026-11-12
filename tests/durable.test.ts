@@ -7,7 +7,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { Message, SendMessageRequest, TaskState } from "@a2a-js/sdk";
+import { SendMessageRequest, TaskState } from "@a2a-js/sdk";
 import { ServerCallContext } from "@a2a-js/sdk/server";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { isTask, sendText, textOf, waitForTask, streamText } from "../src/client.ts";

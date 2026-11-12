@@ -6,6 +6,9 @@ import { ClientFactory, DefaultAgentCardResolver, JsonRpcTransportFactory, RestT
 export type { Client } from "@a2a-js/sdk/client";
 export { TaskState, taskStateToJSON, AgentCard, Message, Task } from "@a2a-js/sdk";
 
+/** The values Node's fetch `Headers` constructor accepts (`HeadersInit`), without DOM types. */
+type HeadersInit = NonNullable<ConstructorParameters<typeof Headers>[0]>;
+
 export interface ConnectionOptions {
   /** Credentials stay in this callback, never in model-visible arguments. */
   headers?: () => HeadersInit | Promise<HeadersInit>;

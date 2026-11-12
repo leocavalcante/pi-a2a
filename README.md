@@ -1,6 +1,6 @@
 # pi-a2a
 
-A2A communication for Pi Durable applications and Pi coding-agent sessions.
+Talk to A2A agents from Pi, and serve Pi Durable agents over the A2A protocol.
 
 - **Client:** an official-SDK A2A client with explicit endpoint trust and bounded responses. It does not import Pi.
 - **Durable adapter:** attach A2A to an existing Harness and its conversations. Task identities, message receipts and results live in that Harness's storage.
@@ -38,7 +38,7 @@ Tool outputs preserve bounded text plus credential-free, approved-origin URL art
 `examples/mesh/provision.mjs` prepares separate, directional peer credentials and per-agent configuration outside Git. It preserves existing keys on rerun and adds new registered agents without rotating older pairs. It performs no networking, live deployment, provider login copy or model call:
 
 ```sh
-npm run build
+bun run build
 node examples/mesh/provision.mjs examples/mesh/directory.example.json /private/existing-parent/peers /auth/a2a
 ```
 
@@ -167,7 +167,7 @@ The extension does not automatically copy the session transcript to a remote age
 
 ## Use the client without Pi
 
-Install from this repository and build it with `npm run build`. Import from `pi-a2a/client`:
+Install from this repository and build it with `bun run build`. Import from `pi-a2a/client`:
 
 ```ts
 import { connectAgent, isTask, newMessageId, sendText, waitForTask } from "@leocavalcante/pi-a2a/client";
@@ -261,8 +261,8 @@ Outbound tools use replay-safe execution with native memos: a confirmed task res
 ## Model-free runnable example
 
 ```sh
-npm ci --ignore-scripts --no-audit --no-fund
-npm run example
+bun install --frozen-lockfile
+bun run example
 ```
 
 This serves a scripted local agent at `http://127.0.0.1:7777`, using SQLite under `./data/`. It makes **no provider requests**. Try `/a2a send demo Hello` from Pi with the configuration above. `DEMO_DATA_DIR` and `PORT` change its private directory and loopback port. An exclusive owner lock fails closed with exit 73; after a hard crash, verify the old process is gone before removing its stale `demo.owner`. SIGTERM closes the owner without durably canceling admitted work.
@@ -271,19 +271,17 @@ A real application supplies its own models, prompts, tools, credentials, environ
 
 ## npm publication
 
-The public package is `@leocavalcante/pi-a2a`. Its initial publication requires the owner's interactive npm login/2FA and `npm publish --access public --provenance=false`; never add an npm token secret to CI. Once the package exists, configure its trusted publisher as GitHub owner `leocavalcante`, repository `pi-a2a`, workflow `publish.yml`, with no environment. Select npm's two-factor authentication/disallow-tokens policy and increment package/lockfile versions before the next release.
-
-`.github/workflows/publish.yml` is manually dispatched on `main`, validates/builds/tests the scoped package, and publishes using GitHub OIDC with provenance. The first interactive bootstrap does not prove OIDC; verify the exact future workflow run and registry version before claiming trusted publication. Git pushes and deployment do not imply registry publication.
+The public package is `@leocavalcante/pi-a2a`. Version 0.4.0 was published by hand, without provenance; tag `v0.4.0` matches its published sources. Automated releases from `main`, with npm provenance, replace manual publishing. Until they are enabled, nothing publishes from this repository.
 
 ## Development and verification
 
 ```sh
-npm run check
-npm test
-npm run build
-npm pack --dry-run --ignore-scripts
+bun install --frozen-lockfile
+bun run verify
 git diff --check
 ```
+
+`verify` type-checks the source, tests, and examples; runs the Bun test suite and the Node.js lane (the extension load test and SIGKILL recovery, which depend on Node.js behavior); builds the package and installs it into an isolated consumer; and audits dependencies. Development uses Bun 1.4.4 and TypeScript 6.0.3. Pi and SDK users run the package on Node.js.
 
 Tests use synthetic messages, isolated stores and faux providers. They exercise the official client against Durable, a non-Pi official-SDK peer, real TUI-bound SDK sessions with delayed HTTP/SSE replies, model-free command completion, busy-session ordering, disk-backed client reopen and lost-injection recovery, branch-local deduplication, bounded reconnects, request conflicts, SQLite reopen/recovery, interrupted waiting, scoped cancellation, task pagination and ownership, protocol errors, output limits and credential-origin boundaries. Passing these tests is not official A2A certification or evidence of live OAuth, every third-party deployment, paid model quality or production HA.
 

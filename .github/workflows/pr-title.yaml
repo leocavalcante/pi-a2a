@@ -1,0 +1,25 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  pr-title:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const conventional = /^(?:build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(?:\([a-z0-9_-]+\))?!?: \S[^\r\n]*$/;
+            // Dependabot writes descriptive titles longer than 72 characters; they
+            // still must be Conventional Commits because they become release notes.
+            const automated = context.payload.pull_request.user.login === "dependabot[bot]";
+            if (!conventional.test(title) || (!automated && title.length > 72) || title.endsWith(".")) {
+              core.setFailed("Use a Conventional Commit title of 72 characters or fewer, without a final period.");
+            }
