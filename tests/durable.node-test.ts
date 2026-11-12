@@ -252,3 +252,29 @@ test("unsupported content and invalid UTF-8 byte lengths never admit model work"
   assert.throws(() => sendText(f.client, "😀".repeat(2049), { messageId: "too-many-bytes" }), /8192/);
   assert.equal(f.faux.state.callCount, 0);
 });
+
+test("a resolver can start a fresh conversation for each new context while follow-ups keep theirs", async t => {
+  const reasons: string[] = [];
+  const seen = (transcript: { messages: readonly { role: string }[] }) => fauxAssistantMessage([fauxText(`user messages: ${transcript.messages.filter(message => message.role === "user").length}`)]);
+  const f = await fixture({ responses: [seen, seen, seen], resolver: ({ harness, model }) => async (_identity, request) => {
+    reasons.push(request.reason);
+    return harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model } }, context);
+  } }); t.after(f.close);
+  const one = await completed(f, "First piece", "message-1");
+  const two = await completed(f, "Follow-up", "message-2", one.contextId);
+  const three = await completed(f, "Unrelated piece", "message-3");
+  assert.deepEqual(reasons, ["send", "send"]);
+  assert.equal(two.contextId, one.contextId);
+  assert.notEqual(three.contextId, one.contextId);
+  assert.deepEqual([textOf(one), textOf(two), textOf(three)], ["user messages: 1", "user messages: 2", "user messages: 1"]);
+});
+
+test("legacy adoption tells the resolver it is looking up an old message ID", async t => {
+  const reasons: string[] = [];
+  const f = await fixture({ answers: ["Fresh"], existingSubmission: async () => undefined, resolver: ({ root }) => (_identity, request) => {
+    reasons.push(`${request.reason}:${request.messageId}`);
+    return root;
+  } }); t.after(f.close);
+  await completed(f, "Hello", "message-1");
+  assert.deepEqual(reasons, ["adopt:message-1", "send:message-1"]);
+});
