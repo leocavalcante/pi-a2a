@@ -1,0 +1,62 @@
+name: Feature request
+description: Suggest an improvement to pi-a2a.
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Privacy:** don't include credentials, private agent endpoints, prompts, conversation content, attachments, or private data. Use synthetic examples. To report a vulnerability, use the private form in [SECURITY.md](https://github.com/leocavalcante/pi-a2a/blob/main/SECURITY.md).
+  - type: input
+    id: extension-version
+    attributes:
+      label: pi-a2a version
+      description: Shown by `pi list`, or in your package.json for SDK use. Enter `unknown` if unavailable.
+      placeholder: 0.1.0
+  - type: input
+    id: pi-version
+    attributes:
+      label: Pi version
+      description: Run `pi --version`, if available. Enter `not used` if this request does not involve Pi.
+      placeholder: 1.5.2
+  - type: input
+    id: durable-version
+    attributes:
+      label: Pi Durable version
+      description: If you use Pi Durable, include its version. Otherwise enter `not used`.
+      placeholder: 1.5.2
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: Run `node --version`, if available.
+      placeholder: v22.19.0
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Other
+        - Not applicable
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem should this solve?
+      description: Describe what you need and why, without private content.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would help?
+      description: Describe the change from a user's point of view. Synthetic examples help.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Optional. Workarounds or other approaches you've tried.
