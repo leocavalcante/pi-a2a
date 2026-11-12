@@ -159,6 +159,7 @@ Workflows use the `.yaml` extension. `ci.yaml` runs on pull requests, whenever `
 
 - Repository-specific jobs go in the same file and in `required.needs`. Examples: tmux builds, Windows process supervision, older Pi pins.
 - Tests that need an external tool, such as tmux, install it in `.github/scripts/setup-test-tools.sh`. The `test` and `pi-min` jobs run that script when it exists, so the shared jobs stay identical.
+- An older Pi can resolve dependencies it no longer works with. List the exact versions it needs per Pi version in `.github/scripts/pi-pins.json`, such as `{ "1.0.4": { "@earendil-works/pi-codemode": "1.1.0" } }`. `install-pi.ts` adds them when it installs that version.
 - `pr-title.yaml` checks that pull request titles are Conventional Commits, because each squash commit title becomes a release note. Titles are limited to 72 characters, except Dependabot's, which are longer but still conventional.
 - **Hygiene (MUST):**
   - Pin actions to full commit SHAs, with a version comment.
