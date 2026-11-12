@@ -46,15 +46,23 @@ const safeFailure = (error: unknown): never => {
 function safeHandler(handler: A2ARequestHandler): A2ARequestHandler {
   return new Proxy(handler, {
     get(target, property) {
-      const method = Reflect.get(target, property);
+      const method: unknown = Reflect.get(target, property);
       if (typeof method !== "function") return method;
       return (...args: unknown[]) => {
         try {
-          const result = method.apply(target, args);
-          if (result && typeof result[Symbol.asyncIterator] === "function") {
+          const callable = method as {
+            apply(thisArg: A2ARequestHandler, args: unknown[]): unknown;
+          };
+          const result: unknown = callable.apply(target, args);
+          if (
+            result &&
+            typeof (result as { [Symbol.asyncIterator]?: unknown })[
+              Symbol.asyncIterator
+            ] === "function"
+          ) {
             return (async function* () {
               try {
-                yield* result;
+                yield* result as AsyncIterable<unknown>;
               } catch (error) {
                 safeFailure(error);
               }
@@ -62,6 +70,8 @@ function safeHandler(handler: A2ARequestHandler): A2ARequestHandler {
           }
           return Promise.resolve(result).catch(safeFailure);
         } catch (error) {
+          // Synchronous dispatch failures become rejected promises, like asynchronous ones.
+          // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- The original throw may be any value and must be sanitized asynchronously.
           return Promise.reject().catch(() => safeFailure(error));
         }
       };
@@ -155,7 +165,7 @@ export function a2aHttpHandler(
       }
       let bytes = 0;
       const chunks: Buffer[] = [];
-      for await (const chunk of request) {
+      for await (const chunk of request as AsyncIterable<Buffer>) {
         bytes += chunk.length;
         if (bytes > (options.maxBodyBytes ?? 65_536)) {
           send(413, { error: "A2A request body exceeds the byte limit." });
@@ -165,7 +175,10 @@ export function a2aHttpHandler(
       }
       let document: Record<string, unknown>;
       try {
-        document = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        document = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+          string,
+          unknown
+        >;
       } catch {
         send(200, {
           jsonrpc: "2.0",

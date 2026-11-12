@@ -24,12 +24,15 @@ import { card, fixture } from "./fixtures/agent.ts";
 async function listen(server: Server) {
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  return `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
 }
 const close = (server: Server) =>
   new Promise<void>((resolve, reject) => {
     server.closeAllConnections();
-    server.close((error) => (error ? reject(error) : resolve()));
+    server.close((error) => {
+      if (error) reject(error);
+      else resolve();
+    });
   });
 
 test("generic client interoperates with an official-SDK server that does not use Pi", async (t) => {
@@ -63,7 +66,9 @@ test("generic client interoperates with an official-SDK server that does not use
   });
   t.after(() => close(server));
   const url = await listen(server);
-  agentCard.supportedInterfaces[0].url = `${url}/a2a`;
+  const supportedInterface = agentCard.supportedInterfaces[0];
+  assert(supportedInterface);
+  supportedInterface.url = `${url}/a2a`;
   const client = await connectAgent(url, { allowHttpLoopback: true });
   const message = await sendText(client, "Hello", { messageId: "foreign-1" });
   assert.equal(isTask(message), false);

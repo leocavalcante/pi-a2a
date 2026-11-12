@@ -134,8 +134,11 @@ export async function fixture(
   );
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  agentCard.supportedInterfaces[0].url = `${baseUrl}/a2a`;
+  const baseUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  const supportedInterface = agentCard.supportedInterfaces[0];
+  if (!supportedInterface)
+    throw new Error("The synthetic card needs an interface.");
+  supportedInterface.url = `${baseUrl}/a2a`;
   const client = await connectAgent(baseUrl, {
     allowHttpLoopback: true,
     headers: options.clientHeaders,
@@ -147,7 +150,10 @@ export async function fixture(
       await adapter.close();
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        }),
       );
       await harness.close(context);
     })());

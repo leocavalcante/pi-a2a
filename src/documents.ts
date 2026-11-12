@@ -52,6 +52,7 @@ export function validateDocument(document: InputDocument): void {
       const text = new TextDecoder("utf-8", { fatal: true }).decode(
         document.data,
       );
+      // eslint-disable-next-line no-control-regex -- Reject control bytes in untrusted UTF-8 documents.
       if (!text.trim() || /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(text))
         documentRejected(
           "Select a nonempty UTF-8 text document, not a binary file.",
@@ -77,7 +78,7 @@ export async function documentText(document: InputDocument): Promise<string> {
   let worker: Worker | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    worker = new Worker(
+    const current = new Worker(
       new URL(
         import.meta.url.endsWith(".ts")
           ? "./document-worker.ts"
@@ -99,11 +100,14 @@ export async function documentText(document: InputDocument): Promise<string> {
         stderr: true,
       },
     );
-    worker.stdout?.resume();
-    worker.stderr?.resume();
+    worker = current;
+    current.stdout.resume();
+    current.stderr.resume();
     return await new Promise<string>((resolve, reject) => {
-      timer = setTimeout(() => reject(new Error("timeout")), 15_000);
-      worker!.once("message", (result: { text?: string; error?: string }) => {
+      timer = setTimeout(() => {
+        reject(new Error("timeout"));
+      }, 15_000);
+      current.once("message", (result: { text?: string; error?: string }) => {
         if (result.error) reject(new Error(result.error));
         else if (
           typeof result.text === "string" &&
@@ -113,31 +117,34 @@ export async function documentText(document: InputDocument): Promise<string> {
           resolve(result.text);
         else reject(new Error("unreadable"));
       });
-      worker!.once("error", (error) =>
+      current.once("error", (error) => {
         reject(
           new Error(
             (error as NodeJS.ErrnoException).code === "ERR_WORKER_OUT_OF_MEMORY"
               ? "unreadable"
               : "unavailable",
           ),
-        ),
-      );
-      worker!.once("exit", () => reject(new Error("unreadable")));
-    }).catch((error) =>
+        );
+      });
+      current.once("exit", () => {
+        reject(new Error("unreadable"));
+      });
+    }).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "";
       documentRejected(
-        error.message === "pages"
+        message === "pages"
           ? "PDFs must contain at most 32 pages. Nothing was truncated."
-          : error.message === "text"
+          : message === "text"
             ? "The PDF text exceeds 128 KiB. Nothing was truncated."
-            : error.message === "empty"
+            : message === "empty"
               ? "One or more PDF pages have no readable text. Scanned or blank pages are unsupported; attach page photos or a text-only copy instead."
-              : error.message === "encrypted"
+              : message === "encrypted"
                 ? "Encrypted PDFs are not supported. Select an unlocked copy."
-                : error.message === "unavailable"
+                : message === "unavailable"
                   ? "The document reader is unavailable. No message was admitted; try again later."
                   : "The PDF could not be read within the document limits. Select a readable, unlocked PDF.",
-      ),
-    );
+      );
+    });
   } finally {
     if (timer) clearTimeout(timer);
     if (worker) await worker.terminate();

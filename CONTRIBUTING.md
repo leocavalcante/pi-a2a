@@ -9,10 +9,10 @@ bun install --frozen-lockfile
 bun run verify
 ```
 
-`verify` type-checks the source, tests, and examples. It runs the Bun and Node.js test lanes, builds the package and validates it in an isolated consumer, and audits dependencies.
+`verify` checks formatting and lint, then type-checks the source, tests, examples, and CI scripts. It runs the Bun and Node.js test lanes, builds the package and validates it in an isolated consumer, and audits dependencies.
 
+- `bun run lint` runs Prettier and ESLint (typescript-eslint `strictTypeChecked`), and `bun run format` applies their fixes. Disable a rule only on the line that needs it, with a reason. Tests may relax the unsafe-any, explicit-`any`, non-null-assertion, and `require-await` rules, because they inspect untyped protocol payloads and use Promise-shaped test doubles.
 - Audits block high and critical vulnerabilities. Run `bun audit` to review every severity.
-- Formatting and ESLint gates are later steps in the [standardization plan](docs/standardization-plan.md).
 
 ```sh
 bun run test:bun

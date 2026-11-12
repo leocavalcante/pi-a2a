@@ -28,21 +28,27 @@ try {
           "str" in item ? item.str + (item.hasEOL ? "\n" : " ") : "",
         )
         .join("")
+        // Strip control characters from extracted untrusted document text.
+        // eslint-disable-next-line no-control-regex -- These ranges intentionally filter PDF control bytes.
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, " ")
         .trim();
       if (!text) throw new Error("empty");
-      const section = `[Page ${number}]\n${text}`;
+      const section = `[Page ${String(number)}]\n${text}`;
       total += Buffer.byteLength(section) + (extracted.length ? 2 : 0);
       if (total > textBytes) throw new Error("text");
       extracted.push(section);
       page.cleanup();
     }
+    // This module runs inside a worker, where parentPort is supplied by Node.
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Worker-thread entrypoints always have a parent port.
     parentPort!.postMessage({ text: extracted.join("\n\n") });
   } finally {
     await pdf.loadingTask.destroy();
   }
 } catch (error) {
   const exception = error as Error;
+  // This module runs inside a worker, where parentPort is supplied by Node.
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Worker-thread entrypoints always have a parent port.
   parentPort!.postMessage({
     error:
       exception.name === "PasswordException"

@@ -93,7 +93,9 @@ for (const retarget of [false, true])
     if (retarget) {
       gamma = await fixture({ answers: [] });
       t.after(gamma.close);
-      m.configs.alpha.agents.beta.url = gamma.baseUrl;
+      const target = m.configs.alpha.agents.beta;
+      assert(target);
+      target.url = gamma.baseUrl;
     }
     const source = await m.reopenSource(
       () => openNodeSqliteStorage(database),
@@ -168,8 +170,14 @@ for (const retarget of [false, true])
       "fetch",
       async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
         const response = await originalFetch(input, init);
+        const inputUrl =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.href
+              : input.url;
         if (
-          String(input) === `${m.beta.baseUrl}/a2a` &&
+          inputUrl === `${m.beta.baseUrl}/a2a` &&
           typeof init?.body === "string" &&
           JSON.parse(init.body).method === "SendMessage"
         ) {
@@ -183,10 +191,11 @@ for (const retarget of [false, true])
             else
               init.signal!.addEventListener(
                 "abort",
-                () =>
+                () => {
                   reject(
                     new DOMException("Synthetic lost receipt", "AbortError"),
-                  ),
+                  );
+                },
                 { once: true },
               );
           });
@@ -206,7 +215,9 @@ for (const retarget of [false, true])
     if (retarget) {
       gamma = await fixture({ answers: [] });
       t.after(gamma.close);
-      m.configs.alpha.agents.beta.url = gamma.baseUrl;
+      const target = m.configs.alpha.agents.beta;
+      assert(target);
+      target.url = gamma.baseUrl;
     }
     const source = await m.reopenSource(
       () => openNodeSqliteStorage(database),

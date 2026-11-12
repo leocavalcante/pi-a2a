@@ -58,11 +58,9 @@ test("one Durable agent can delegate to another through the public outbound tool
     .filter((message) => message.role === "toolResult");
   assert.equal(replies.length, 1);
   const reply = replies[0];
-  assert.equal(reply.role, "toolResult");
-  if (reply.role === "toolResult") {
-    assert.equal(reply.isError, false);
-    assert.match(JSON.stringify(reply.content), /Delegated reply/);
-  }
+  assert(reply);
+  assert.equal(reply.isError, false);
+  assert.match(JSON.stringify(reply.content), /Delegated reply/);
   assert.equal(target.faux.state.callCount, 1);
   assert.equal(source.faux.state.callCount, 2);
   assert.ok(!source.reports.includes("extension_error"));

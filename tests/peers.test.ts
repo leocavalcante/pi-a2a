@@ -33,8 +33,7 @@ const lastResult = (messages: TranscriptContext["messages"]) => {
 };
 
 test("a plain A2A client gets a dynamically discovered peer's result without any app-specific protocol", async (t) => {
-  let m: Awaited<ReturnType<typeof mesh>>;
-  m = await mesh({
+  const m: Awaited<ReturnType<typeof mesh>> = await mesh({
     targetFileArtifacts: async (task) => [
       Artifact.fromJSON({
         artifactId: "chart",
@@ -76,15 +75,16 @@ test("a plain A2A client gets a dynamically discovered peer's result without any
       const peer = directory.agents.find(
         (value: { skills?: { description: string }[] }) =>
           value.skills?.some((skill) =>
-            /precise synthetic charts/.test(skill.description),
+            skill.description.includes("precise synthetic charts"),
           ),
       );
+      assert(peer);
       assert.equal(peer.agent, "beta");
       assert.ok(!JSON.stringify(directory).includes("Bearer"));
       assert.ok(!JSON.stringify(directory).includes("TokenFile"));
       return fauxAssistantMessage(
         fauxToolCall("a2a_send", {
-          agent: peer.agent,
+          agent: String(peer.agent),
           message: "Plot the synthetic values 2, 4 and 6.",
         }),
         { stopReason: "toolUse" },
@@ -94,10 +94,14 @@ test("a plain A2A client gets a dynamically discovered peer's result without any
       const reply = lastResult(modelContext.messages);
       assert.equal(reply.state, "TASK_STATE_COMPLETED");
       assert.match(reply.text, /Synthetic chart rendered/);
-      assert.equal(reply.artifacts[0].parts[0].mediaType, "image/png");
+      const imageArtifact = reply.artifacts[0];
+      assert(imageArtifact);
+      const imagePart = imageArtifact.parts[0];
+      assert(imagePart);
+      assert.equal(imagePart.mediaType, "image/png");
       childId = reply.taskId;
       return fauxAssistantMessage(
-        `The selected specialist replied: ${reply.text}`,
+        `The selected specialist replied: ${String(reply.text)}`,
       );
     },
   ]);
@@ -138,10 +142,11 @@ test("a plain A2A client gets a dynamically discovered peer's result without any
   };
   assert.equal(document.error, undefined);
   assert.equal(document.result.task.status.state, "TASK_STATE_COMPLETED");
-  assert.match(
-    document.result.task.artifacts[0].parts[0].text,
-    /Synthetic chart rendered/,
-  );
+  const chartArtifact = document.result.task.artifacts[0];
+  assert(chartArtifact);
+  const chartPart = chartArtifact.parts[0];
+  assert(chartPart);
+  assert.match(chartPart.text, /Synthetic chart rendered/);
   assert.ok(childId);
   const peerTask = await (
     await m.peerClient()
@@ -156,7 +161,11 @@ test("a plain A2A client gets a dynamically discovered peer's result without any
     historyLength: 0,
   });
   assert.equal(ownerTask.id, childId);
-  assert.equal(ownerTask.artifacts[1].parts[0].mediaType, "image/png");
+  const imageArtifact = ownerTask.artifacts[1];
+  assert(imageArtifact);
+  const imagePart = imageArtifact.parts[0];
+  assert(imagePart);
+  assert.equal(imagePart.mediaType, "image/png");
   assert.equal(m.alpha.faux.state.callCount, 3);
   assert.equal(m.beta.faux.state.callCount, 1);
   assert.deepEqual(m.alpha.reports, []);
@@ -197,7 +206,9 @@ test("registration changes become discoverable without changing agent code; pagi
     offset: page.nextOffset,
     limit: 1,
   });
-  assert.equal(next.agents[0].name, "gamma");
+  const nextAgent = next.agents[0];
+  assert(nextAgent);
+  assert.equal(nextAgent.name, "gamma");
   assert.equal(next.nextOffset, undefined);
   assert.equal(gamma.faux.state.callCount, 0);
   assert.equal(m.beta.faux.state.callCount, 0);

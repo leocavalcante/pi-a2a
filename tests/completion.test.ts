@@ -206,13 +206,12 @@ test("real TUI-bound Pi receives an HTTP/SSE answer and starts one follow-up aft
     (message) =>
       message.role === "toolResult" && message.toolName === "a2a_send",
   );
-  assert.equal(receipt?.role, "toolResult");
-  if (receipt?.role === "toolResult") {
-    const reply = receipt.details as Reply;
-    assert.equal(reply.watching, true);
-    assert.equal(reply.state, "TASK_STATE_WORKING");
-    assert.ok(reply.taskId);
-  }
+  assert(receipt);
+  assert.equal(receipt.role, "toolResult");
+  const reply = receipt.details as Reply;
+  assert.equal(reply.watching, true);
+  assert.equal(reply.state, "TASK_STATE_WORKING");
+  assert.ok(reply.taskId);
   await peer.subscribed.promise;
   peer.release.resolve("Authoritative delayed HTTP/SSE answer");
   await s.wait(
@@ -253,9 +252,9 @@ test("/a2a returns admission then displays the answer in a fresh Pi session with
       (entry) =>
         entry.type === "custom_message" && entry.customType === "pi-a2a",
     );
-  assert.equal(receipt?.type, "custom_message");
-  if (receipt?.type === "custom_message")
-    assert.equal((receipt.details as Reply).watching, true);
+  assert(receipt);
+  assert.equal(receipt.type, "custom_message");
+  assert.equal((receipt.details as Reply).watching, true);
   assert.equal(s.completions().length, 0);
   assert.equal(s.faux.state.callCount, 0);
   await assert.rejects(access(manager.getSessionFile()!), { code: "ENOENT" });
@@ -317,7 +316,9 @@ test("disk-backed Pi history reopens an admitted task without resubmitting it", 
     /Answer retained while Pi was closed/,
   );
   assert.equal(peer.sent.length, 1);
-  assert.equal(peer.sent[0].message?.messageId, "disk-admitted");
+  const sent = peer.sent[0];
+  assert(sent);
+  assert.equal(sent.message?.messageId, "disk-admitted");
   assert.equal(peer.cancellations, 0);
   assert.deepEqual(reopened.errors, []);
 });
@@ -385,7 +386,7 @@ test("completion during unrelated local tool work waits for idle and preserves r
       say("Remote answer after local work"),
     ],
     SessionManager.create(dir, join(dir, "sessions")),
-    (pi) =>
+    (pi) => {
       pi.registerTool({
         name: "hold_local",
         label: "Synthetic local gate",
@@ -399,7 +400,8 @@ test("completion during unrelated local tool work waits for idle and preserves r
             details: {},
           };
         },
-      }),
+      });
+    },
   );
   t.after(async () => {
     release.resolve();

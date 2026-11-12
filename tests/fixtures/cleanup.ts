@@ -18,7 +18,9 @@ export function deferred(t: TestContext): (step: () => unknown) => void {
         failure ??= error;
       }
     }
-    if (failure !== undefined) throw failure;
+    if (failure instanceof Error) throw failure;
+    if (failure !== undefined)
+      throw new Error("Cleanup rejected with a non-Error value.");
   });
   return (step) => {
     steps.push(step);

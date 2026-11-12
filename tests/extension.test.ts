@@ -39,9 +39,11 @@ function mockPi() {
   const entries: unknown[] = [];
   const pi = {
     registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
-    registerCommand() {},
+    registerCommand() {
+      return undefined;
+    },
     on() {
-      return () => {};
+      return () => undefined;
     },
     appendEntry: (customType: string, data: unknown) =>
       entries.push({ type: "custom", customType, data }),
@@ -221,7 +223,7 @@ test("a private credential file authenticates requests without environment expor
     response.setHeader("Content-Type", "application/json");
     response.end(
       JSON.stringify(
-        AgentCard.toJSON(card(`http://${request.headers.host}/a2a`)),
+        AgentCard.toJSON(card(`http://${String(request.headers.host)}/a2a`)),
       ),
     );
   });
@@ -231,13 +233,15 @@ test("a private credential file authenticates requests without environment expor
     () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
-        server.close(() => resolve());
+        server.close(() => {
+          resolve();
+        });
       }),
   );
   await configuredAgent("sample", {
     agents: {
       sample: {
-        url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+        url: `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`,
         allowHttpLoopback: true,
         bearerTokenFile: credential,
       },
@@ -306,12 +310,13 @@ test("a real Pi SDK session executes the extension tool through A2A to Durable",
   t.after(() => rm(dir, { recursive: true }));
   const { session, faux } = await sdkSession(
     dir,
-    (pi) =>
+    (pi) => {
       registerA2A(pi, {
         loadConfig: async () => ({
           agents: { sample: { url: f.baseUrl, allowHttpLoopback: true } },
         }),
-      }),
+      });
+    },
     [
       fauxAssistantMessage(
         [
@@ -336,11 +341,10 @@ test("a real Pi SDK session executes the extension tool through A2A to Durable",
     );
     assert.equal(replies.length, 1);
     const reply = replies[0];
-    assert.equal(reply.role, "toolResult");
-    if (reply.role === "toolResult") {
-      assert.equal(reply.isError, false);
-      assert.match(JSON.stringify(reply.content), /Durable reply/);
-    }
+    assert(reply);
+    assert(reply.role === "toolResult");
+    assert.equal(reply.isError, false);
+    assert.match(JSON.stringify(reply.content), /Durable reply/);
     assert.equal(session.getLastAssistantText(), "Finished");
     assert.equal(faux.state.callCount, 2);
     assert.equal(f.faux.state.callCount, 1);
@@ -356,12 +360,13 @@ test("the /a2a command sends without invoking a Pi-session model", async (t) => 
   t.after(() => rm(dir, { recursive: true }));
   const { session, faux } = await sdkSession(
     dir,
-    (pi) =>
+    (pi) => {
       registerA2A(pi, {
         loadConfig: async () => ({
           agents: { sample: { url: f.baseUrl, allowHttpLoopback: true } },
         }),
-      }),
+      });
+    },
     [],
   );
   try {
@@ -384,7 +389,7 @@ test("fresh command-only TUI receipts are not written to disk by Pi 1.5.0", asyn
   let checkedIntent = false;
   const { session, faux } = await sdkSession(
     dir,
-    (pi) =>
+    (pi) => {
       registerA2A(pi, {
         loadConfig: async () => ({
           agents: { sample: { url: f.baseUrl, allowHttpLoopback: true } },
@@ -403,7 +408,8 @@ test("fresh command-only TUI receipts are not written to disk by Pi 1.5.0", asyn
           checkedIntent = true;
           return f.client;
         },
-      }),
+      });
+    },
     [],
     manager,
   );

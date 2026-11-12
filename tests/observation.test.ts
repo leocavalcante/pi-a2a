@@ -38,6 +38,11 @@ const config: AgentConfig = {
   agents: { sample: { url: "https://synthetic.invalid" } },
 };
 const identity = { taskId: "task-1", contextId: "context-1" };
+function at<T>(values: readonly T[], index: number): T {
+  const value = values[index];
+  assert(value !== undefined, `Missing test value at index ${String(index)}`);
+  return value;
+}
 const admitted = (sessionId = "session-1") => ({
   version: 1 as const,
   phase: "admitted" as const,
@@ -59,16 +64,16 @@ async function local(
     tools = new Map<string, ToolDefinition>();
   const handlers = new Map<
     string,
-    Array<(event: unknown, ctx: ExtensionContext) => unknown>
+    ((event: unknown, ctx: ExtensionContext) => unknown)[]
   >();
   const commands = new Map<
     string,
     Parameters<ExtensionAPI["registerCommand"]>[1]
   >();
-  type Injection = {
+  interface Injection {
     message: Parameters<ExtensionAPI["sendMessage"]>[0];
     options: Parameters<ExtensionAPI["sendMessage"]>[1];
-  };
+  }
   const injections: Injection[] = [],
     notices: string[] = [];
   const widgets = new Map<string, string[]>();
@@ -116,7 +121,7 @@ async function local(
       const values = handlers.get(name) ?? [];
       values.push(handler);
       handlers.set(name, values);
-      return () => {};
+      return () => undefined;
     },
     registerTool: (tool: ToolDefinition) => tools.set(tool.name, tool),
     registerCommand: (
@@ -195,25 +200,29 @@ async function local(
         ctx as never,
       );
       assert.ok(Value.Check(Output, value.structuredContent));
-      return value.structuredContent as Reply;
+      return value.structuredContent;
     },
-    command: (args: string) => commands.get("a2a")!.handler(args, ctx as never),
-    shutdown: () => emit("session_shutdown"),
+    command: async (args: string) => {
+      await commands.get("a2a")!.handler(args, ctx as never);
+    },
+    shutdown: async () => {
+      await emit("session_shutdown");
+    },
   };
 }
 
 test("TUI admission retains intent/admission and observes with an independent signal", async (t) => {
   const h = await local();
   t.after(h.shutdown);
-  h.onConnect(() =>
+  h.onConnect(() => {
     assert.ok(
       h.manager
         .getBranch()
         .some(
           (entry) => entry.type === "custom" && entry.customType === watchKind,
         ),
-    ),
-  );
+    );
+  });
   h.peer.read = (id) => {
     assert.ok(
       [...history(h.ctx).records.values()].some(
@@ -232,8 +241,8 @@ test("TUI admission retains intent/admission and observes with an independent si
   originalTurn.abort();
   assert.equal(reply.watching, true);
   assert.equal(reply.state, "TASK_STATE_WORKING");
-  assert.equal(h.peer.sent[0].configuration?.returnImmediately, true);
-  assert.equal(h.peer.sent[0].message?.messageId, reply.messageId);
+  assert.equal(at(h.peer.sent, 0).configuration?.returnImmediately, true);
+  assert.equal(at(h.peer.sent, 0).message?.messageId, reply.messageId);
   const records = h.manager
     .getBranch()
     .filter(
@@ -248,11 +257,11 @@ test("TUI admission retains intent/admission and observes with an independent si
   await changedUntil(h.peer.events, () => h.peer.active === 1);
   h.peer.settle();
   await h.wait(() => h.injections.length === 1);
-  assert.equal(h.injections[0].message.customType, completionKind);
-  assert.equal(h.injections[0].options?.triggerTurn, true);
-  assert.equal(h.injections[0].options?.deliverAs, "followUp");
+  assert.equal(at(h.injections, 0).message.customType, completionKind);
+  assert.equal(at(h.injections, 0).options?.triggerTurn, true);
+  assert.equal(at(h.injections, 0).options?.deliverAs, "followUp");
   assert.match(
-    String(h.injections[0].message.content),
+    JSON.stringify(at(h.injections, 0).message.content),
     /Synthetic remote answer/,
   );
   await h.emit("agent_settled");
@@ -345,8 +354,8 @@ test("observer deduplication binds endpoint, task and message identities, not ju
   await h.emit("agent_settled");
   await h.wait(() => h.injections.length === 2);
   assert.notEqual(
-    (h.injections[0].message.details as { taskId: string }).taskId,
-    (h.injections[1].message.details as { taskId: string }).taskId,
+    (at(h.injections, 0).message.details as { taskId: string }).taskId,
+    (at(h.injections, 1).message.details as { taskId: string }).taskId,
   );
 });
 
@@ -392,8 +401,14 @@ test("busy Pi retains ready state outside the SDK queue; simultaneous tasks drai
   assert.equal(h.injections.length, 1);
   await h.emit("agent_settled");
   await h.wait(() => h.injections.length === 2);
-  assert.match(String(h.injections[0].message.content), /First result/);
-  assert.match(String(h.injections[1].message.content), /Second result/);
+  assert.match(
+    JSON.stringify(at(h.injections, 0).message.content),
+    /First result/,
+  );
+  assert.match(
+    JSON.stringify(at(h.injections, 1).message.content),
+    /Second result/,
+  );
   assert.equal(h.widgets.size, 0);
 });
 
@@ -412,7 +427,7 @@ test("a queued but unpersisted injection is not acknowledged, and reopening reco
   t.after(reopened.shutdown);
   await reopened.wait(() => reopened.injections.length === 1);
   assert.match(
-    String(reopened.injections[0].message.content),
+    JSON.stringify(at(reopened.injections, 0).message.content),
     /Synthetic remote answer/,
   );
   assert.equal(history(reopened.ctx).delivered.size, 1);
@@ -427,7 +442,7 @@ test("synchronous delivery errors pause once, sanitize diagnostics and retain th
   await h.send();
   h.peer.settle();
   await h.wait(() => h.notices.length === 1);
-  assert.ok(!h.notices[0].includes("synthetic-private"));
+  assert.ok(!at(h.notices, 0).includes("synthetic-private"));
   assert.ok(
     [...history(h.ctx).records.values()].some(
       (record) =>
@@ -440,7 +455,7 @@ test("synchronous delivery errors pause once, sanitize diagnostics and retain th
   t.after(reopened.shutdown);
   await reopened.wait(() => reopened.injections.length === 1);
   assert.match(
-    String(reopened.injections[0].message.content),
+    JSON.stringify(at(reopened.injections, 0).message.content),
     /Synthetic remote answer/,
   );
 });
@@ -474,11 +489,9 @@ test("legacy, malformed and uncertain intent entries do not enroll arbitrary tas
     ...admitted(manager.getSessionId()),
     endpoint: "not-a-fingerprint",
   });
-  const {
-    taskId: _task,
-    contextId: _context,
-    ...intent
-  } = admitted(manager.getSessionId());
+  const { taskId, contextId, ...intent } = admitted(manager.getSessionId());
+  assert.equal(taskId, "task-1");
+  assert.equal(contextId, "context-1");
   manager.appendCustomEntry(watchKind, { ...intent, phase: "intent" });
   const h = await local(new Peer(), manager);
   t.after(h.shutdown);
@@ -506,14 +519,16 @@ test("navigation before the watch excludes stale callbacks; descendant growth an
   await h.emit("session_tree");
   h.manager.appendCustomEntry("ordinary-growth", {});
   await h.wait(() => h.injections.length === 1);
-  const firstKey = (h.injections[0].message.details as { deliveryKey: string })
-    .deliveryKey;
+  const firstKey = (
+    at(h.injections, 0).message.details as { deliveryKey: string }
+  ).deliveryKey;
   await h.emit("agent_settled");
   h.manager.branch(admissionLeaf);
   await h.emit("session_tree");
   await h.wait(() => h.injections.length === 2);
   assert.equal(
-    (h.injections[1].message.details as { deliveryKey: string }).deliveryKey,
+    (at(h.injections, 1).message.details as { deliveryKey: string })
+      .deliveryKey,
     firstKey,
   );
 });
@@ -589,7 +604,7 @@ test("unsupported streaming pauses once without inventing task failure or pollin
   const reply = await h.send();
   assert.equal(reply.state, "TASK_STATE_WORKING");
   await h.wait(() => h.notices.length === 1);
-  assert.match(h.notices[0], /STREAMING_UNAVAILABLE/);
+  assert.match(at(h.notices, 0), /STREAMING_UNAVAILABLE/);
   assert.match(
     [...h.widgets.values()].flat().join("\n"),
     /Observation paused; remote work may continue/,
@@ -678,11 +693,13 @@ test("new authorized input rearms an interrupted task with a new message identit
   );
   await h.wait(() => h.injections.length === 2);
   assert.notEqual(
-    (h.injections[0].message.details as { deliveryKey: string }).deliveryKey,
-    (h.injections[1].message.details as { deliveryKey: string }).deliveryKey,
+    (at(h.injections, 0).message.details as { deliveryKey: string })
+      .deliveryKey,
+    (at(h.injections, 1).message.details as { deliveryKey: string })
+      .deliveryKey,
   );
   assert.match(
-    String(h.injections[1].message.content),
+    JSON.stringify(at(h.injections, 1).message.content),
     /Answer after authorized input/,
   );
   assert.equal(h.peer.sent.length, 2);
@@ -823,6 +840,7 @@ test("transport timeouts renew healthy streams without imposing a task deadline"
     connections = 0;
   peer.stream = async function* () {
     now += 330_000;
+    yield* [];
     throw new DOMException("Synthetic timeout", "TimeoutError");
   };
   const result = await observeTask(
@@ -836,7 +854,7 @@ test("transport timeouts renew healthy streams without imposing a task deadline"
       return peer.client;
     },
     new AbortController().signal,
-    { sleep: async () => {}, now: () => now },
+    { sleep: async () => undefined, now: () => now },
   );
   assert.equal(result.status?.state, TaskState.TASK_STATE_COMPLETED);
   assert.equal(connections, 2);
@@ -894,7 +912,7 @@ test("permanent credential errors do not retry; unknown diagnostics never escape
       identity,
       async () => peer.client,
       new AbortController().signal,
-      { sleep: async () => {} },
+      { sleep: async () => undefined },
     ),
     (error) => {
       assert.ok(error instanceof Error);

@@ -62,7 +62,11 @@ test("host URL artifacts enrich retained completed tasks without rerunning or ch
   assert.equal(enriched.status?.timestamp, stamp);
   assert.deepEqual(enriched.artifacts[0], admitted.artifacts[0]);
   assert.equal(f.faux.state.callCount, 1);
-  assert.equal(enriched.artifacts[1].parts[0].content?.$case, "url");
+  const secondArtifact = enriched.artifacts[1];
+  assert(secondArtifact);
+  const firstPart = secondArtifact.parts[0];
+  assert(firstPart);
+  assert.equal(firstPart.content?.$case, "url");
   await f.close();
   const reopened = await fixture({
     storage: await openNodeSqliteStorage(database),
@@ -117,18 +121,27 @@ test("host artifacts cannot replace the answer or expose credential-bearing and 
     fileArtifacts: async (task) => {
       const result = file(origin, task.id);
       if (variant === "duplicate") result.artifactId = "answer";
-      if (variant === "external")
-        result.parts[0].content = {
+      if (variant === "external") {
+        const part = result.parts[0];
+        assert(part);
+        part.content = {
           $case: "url",
           value: "https://elsewhere.invalid/image.png",
         };
-      if (variant === "query")
-        result.parts[0].content = {
+      }
+      if (variant === "query") {
+        const part = result.parts[0];
+        assert(part);
+        part.content = {
           $case: "url",
           value: `${origin}/image.png?private=value`,
         };
-      if (variant === "type")
-        result.parts[0].mediaType = "application/octet-stream";
+      }
+      if (variant === "type") {
+        const part = result.parts[0];
+        assert(part);
+        part.mediaType = "application/octet-stream";
+      }
       return [result];
     },
   });

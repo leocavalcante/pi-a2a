@@ -124,7 +124,7 @@ test("malformed, empty/scanned, excessive-page and excessive-text PDFs are rejec
     await assert.rejects(
       f.client.sendMessage(request(data)),
       /PDF|document|32|128/i,
-      `Expected no admission for ${data.length}-byte fixture`,
+      `Expected no admission for ${String(data.length)}-byte fixture`,
     );
   }
   assert.equal(f.faux.state.callCount, 0);
@@ -132,24 +132,28 @@ test("malformed, empty/scanned, excessive-page and excessive-text PDFs are rejec
   assert.equal(listed.tasks.length, 0);
 });
 test("document validation rejects paths, URLs, oversized data and more than one document", async (t) => {
-  assert.throws(() =>
+  assert.throws(() => {
     validateDocument({
       data: pdf,
       mediaType: "application/pdf",
       filename: "../proof.pdf",
-    }),
-  );
-  assert.throws(() =>
+    });
+  });
+  assert.throws(() => {
     validateDocument({
       data: Buffer.alloc(MAX_DOCUMENT_BYTES + 1),
       mediaType: "application/pdf",
       filename: "proof.pdf",
-    }),
-  );
+    });
+  });
   const f = await fixture({ documents: true });
   t.after(f.close);
   const multiple = request();
-  multiple.message!.parts.push(multiple.message!.parts[0]);
+  const message = multiple.message;
+  assert(message);
+  const firstPart = message.parts[0];
+  assert(firstPart);
+  message.parts.push(firstPart);
   await assert.rejects(f.client.sendMessage(multiple), /one document/);
   await assert.rejects(
     f.client.sendMessage(
@@ -194,9 +198,11 @@ test("document rejection carries standard pre-admission ErrorInfo on the actual 
   assert.equal(response.status, 200);
   assert.equal(wire.id, "document-rejection");
   assert.equal(wire.error.code, -32005);
-  assert.equal(wire.error.data[0].domain, "a2a-protocol.org");
-  assert.equal(wire.error.data[0].reason, "CONTENT_TYPE_NOT_SUPPORTED");
-  assert.deepEqual(wire.error.data[0].metadata, {
+  const errorInfo = wire.error.data[0];
+  assert(errorInfo);
+  assert.equal(errorInfo.domain, "a2a-protocol.org");
+  assert.equal(errorInfo.reason, "CONTENT_TYPE_NOT_SUPPORTED");
+  assert.deepEqual(errorInfo.metadata, {
     input: "document",
     admission: "rejected",
   });
@@ -219,12 +225,12 @@ test("TXT, Markdown and CSV preserve UTF-8; binary and invalid encodings are rej
     Buffer.from(" "),
     Buffer.alloc(131_073, 65),
   ]) {
-    assert.throws(() =>
+    assert.throws(() => {
       validateDocument({
         data,
         filename: "proof.txt",
         mediaType: "text/plain",
-      }),
-    );
+      });
+    });
   }
 });

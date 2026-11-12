@@ -24,16 +24,24 @@ export interface PushOptions {
   /** Read-only synchronous validation of actual callback JSON, including exact saved retries. Throw to withhold. */
   validatePayload?: (payload: unknown) => void;
 }
-type Saved = {
+interface Saved extends Record<string, JsonValue> {
   scope: string;
   taskId: string;
-  config: { [key: string]: JsonValue };
+  config: Record<string, JsonValue>;
   delivered: string;
   pending: string;
   body: string;
   attempts: number;
   next: number;
-};
+}
+const terminalStates: number[] = [
+  TaskState.TASK_STATE_COMPLETED,
+  TaskState.TASK_STATE_INPUT_REQUIRED,
+  TaskState.TASK_STATE_AUTH_REQUIRED,
+  TaskState.TASK_STATE_FAILED,
+  TaskState.TASK_STATE_CANCELED,
+  TaskState.TASK_STATE_REJECTED,
+];
 const Registry = defineDocFamily<{ items: Record<string, Saved> }, null>({
   kind: "pi-a2a.push",
   version: 1,
@@ -42,7 +50,7 @@ const Registry = defineDocFamily<{ items: Record<string, Saved> }, null>({
   initial: () => ({ items: {} }),
   checkpointWhen: () => true,
 });
-const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const id = (value: string) => {
@@ -105,6 +113,7 @@ export class DurablePush {
       value.token ||
       value.authentication?.scheme.toLowerCase() !== "bearer" ||
       !/^[A-Za-z0-9._~+/-]{16,16300}=*$/.test(
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Runtime callback JSON may omit credentials.
         value.authentication?.credentials ?? "",
       )
     )
@@ -138,9 +147,10 @@ export class DurablePush {
         "Push configuration limit reached; remove finished task configurations.",
       );
     const previous = registry.items[key];
-    const json = clone(TaskPushNotificationConfig.toJSON(value)) as {
-      [key: string]: JsonValue;
-    };
+    const json = clone(TaskPushNotificationConfig.toJSON(value)) as Record<
+      string,
+      JsonValue
+    >;
     if (previous && hash(previous.config) === hash(json)) return;
     registry.items[key] = {
       scope,
@@ -194,7 +204,7 @@ export class DurablePush {
       try {
         const cursor = JSON.parse(
           Buffer.from(pageToken, "base64url").toString(),
-        );
+        ) as { scope?: unknown; taskId?: unknown; after?: unknown };
         if (
           pageToken.length > 1024 ||
           cursor.scope !== scope ||
@@ -214,7 +224,11 @@ export class DurablePush {
       nextPageToken:
         remaining.length > pageSize
           ? Buffer.from(
-              JSON.stringify({ scope, taskId, after: configs.at(-1)!.id }),
+              JSON.stringify({
+                scope,
+                taskId,
+                after: configs.at(-1)?.id ?? "",
+              }),
             ).toString("base64url")
           : "",
     };
@@ -224,9 +238,10 @@ export class DurablePush {
     id(configId);
     await this.task(taskId, scope);
     await this.harness.commit(async (tx) => {
-      delete (await tx.doc(Registry, "callbacks", null)).items[
-        hash([scope, taskId, configId])
-      ];
+      const items = (await tx.doc(Registry, "callbacks", null)).items;
+      // Callback records are intentionally keyed by a computed scope/task/config digest.
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete -- Remove only this exact persisted registry key.
+      delete items[hash([scope, taskId, configId])];
     }, this.context);
   }
   start(): void {
@@ -255,10 +270,9 @@ export class DurablePush {
     await this.flight;
   }
   flush(): Promise<void> {
-    if (!this.flight)
-      this.flight = this.deliver().finally(() => {
-        this.flight = undefined;
-      });
+    this.flight ??= this.deliver().finally(() => {
+      this.flight = undefined;
+    });
     return this.flight;
   }
   private async deliver(): Promise<void> {
@@ -272,17 +286,7 @@ export class DurablePush {
     for (const [key, saved] of Object.entries(registry.items)) {
       if (this.abort.signal.aborted || saved.next > Date.now()) continue;
       const task = await this.task(saved.taskId, saved.scope);
-      if (
-        ![
-          TaskState.TASK_STATE_COMPLETED,
-          TaskState.TASK_STATE_INPUT_REQUIRED,
-          TaskState.TASK_STATE_AUTH_REQUIRED,
-          TaskState.TASK_STATE_FAILED,
-          TaskState.TASK_STATE_CANCELED,
-          TaskState.TASK_STATE_REJECTED,
-        ].includes(task.status?.state ?? 0)
-      )
-        continue;
+      if (!terminalStates.includes(task.status?.state ?? 0)) continue;
       const revision = hash([task.id, task.contextId, task.status]);
       if (saved.delivered === revision && !saved.pending) continue;
       // Persist intent before the external effect; retry uses the identical body.
@@ -310,8 +314,7 @@ export class DurablePush {
         await this.harness.snapshot(Registry, "callbacks", this.context)
       )?.items[key];
       if (
-        !latest ||
-        latest.pending !== pending ||
+        latest?.pending !== pending ||
         hash(latest.config) !== hash(saved.config)
       )
         continue;
@@ -326,6 +329,8 @@ export class DurablePush {
           headers: {
             "Content-Type": "application/a2a+json",
             "A2A-Version": "1.0",
+            // validate() requires bounded bearer credentials before callback delivery.
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- The preceding validation guarantees authentication.
             Authorization: `Bearer ${config.authentication!.credentials}`,
           },
           body,
@@ -342,8 +347,7 @@ export class DurablePush {
       await this.harness.commit(async (tx) => {
         const current = (await tx.doc(Registry, "callbacks", null)).items[key];
         if (
-          !current ||
-          current.pending !== pending ||
+          current?.pending !== pending ||
           hash(current.config) !== hash(saved.config)
         )
           return;

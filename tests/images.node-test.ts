@@ -49,7 +49,7 @@ test("photo bytes reach the provider and receipt dedup survives reopen, includin
       );
       assert.ok(user && Array.isArray(user.content));
       const image = user.content.find((part) => part.type === "image");
-      assert.ok(image && image.type === "image");
+      assert(image);
       assert.equal(image.data, png);
       assert.equal(image.mimeType, "image/png");
       observed = true;

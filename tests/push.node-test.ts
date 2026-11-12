@@ -21,7 +21,7 @@ async function callback() {
   const server = createServer((request, response) => {
     void (async () => {
       let body = "";
-      for await (const chunk of request) body += chunk.toString();
+      for await (const chunk of request) body += String(chunk);
       calls.push({
         body,
         auth: request.headers.authorization,
@@ -34,7 +34,7 @@ async function callback() {
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const origin = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
   return {
     calls,
     events,
@@ -44,7 +44,11 @@ async function callback() {
     },
     close: async () => {
       server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      );
     },
   };
 }
@@ -90,12 +94,14 @@ test("A2A push is delivered without a task reader or SSE observer, then deduplic
   await delivered;
   await f.adapter.close();
   assert.equal(receiver.calls.length, 1);
-  const event = JSON.parse(receiver.calls[0].body);
+  const call = receiver.calls[0];
+  assert(call);
+  const event = JSON.parse(call.body);
   assert.equal(event.task.id, response.id);
   assert.equal(event.task.status.state, "TASK_STATE_COMPLETED");
   assert.deepEqual(event.task.history ?? [], []);
-  assert.equal(receiver.calls[0].type, "application/a2a+json");
-  assert.equal(receiver.calls[0].auth, `Bearer ${token}`);
+  assert.equal(call.type, "application/a2a+json");
+  assert.equal(call.auth, `Bearer ${token}`);
   assert.ok(!JSON.stringify(event).includes(token));
   assert.equal(f.faux.state.callCount, 1);
 });
@@ -160,7 +166,11 @@ test("callback guard withholds both new payloads and exact saved retries across 
   receiver.code(202);
   await reopened.adapter.flushPush();
   assert.equal(receiver.calls.length, 2);
-  assert.equal(receiver.calls[0].body, receiver.calls[1].body);
+  const firstCall = receiver.calls[0];
+  const secondCall = receiver.calls[1];
+  assert(firstCall);
+  assert(secondCall);
+  assert.equal(firstCall.body, secondCall.body);
   assert.equal(checks, 4);
   assert.equal(reopened.faux.state.callCount, 0);
 });
@@ -215,7 +225,9 @@ test("push configurations are scoped, paginated and removable", async (t) => {
     { tenant: "", taskId: task.id, pageSize: 1, pageToken: "" },
     owner,
   );
-  assert.equal(first.configs[0].id, "a");
+  const firstConfig = first.configs[0];
+  assert(firstConfig);
+  assert.equal(firstConfig.id, "a");
   assert.ok(first.nextPageToken);
   const second = await f.adapter.listTaskPushNotificationConfigs(
     {
@@ -226,7 +238,9 @@ test("push configurations are scoped, paginated and removable", async (t) => {
     },
     owner,
   );
-  assert.equal(second.configs[0].id, "b");
+  const secondConfig = second.configs[0];
+  assert(secondConfig);
+  assert.equal(secondConfig.id, "b");
   const foreign = new ServerCallContext({
     user: { isAuthenticated: true, userName: "other-owner" },
   });
@@ -294,6 +308,10 @@ test("unacknowledged push survives SQLite reopen and reuses the exact event body
   await reopened.adapter.flushPush();
   await reopened.adapter.flushPush();
   assert.equal(receiver.calls.length, 2);
-  assert.equal(receiver.calls[0].body, receiver.calls[1].body);
+  const firstCall = receiver.calls[0];
+  const secondCall = receiver.calls[1];
+  assert(firstCall);
+  assert(secondCall);
+  assert.equal(firstCall.body, secondCall.body);
   assert.equal(reopened.faux.state.callCount, 0);
 });

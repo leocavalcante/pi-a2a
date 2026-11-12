@@ -23,6 +23,7 @@ import { fixture } from "./fixtures/agent.ts";
 test("SIGKILL recovery preserves the admitted task and message-ID binding", async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-kill-"));
   const db = join(dir, "agent.sqlite");
+  // eslint-disable-next-line prefer-const -- Registered cleanup must cover failure before recovery setup finishes.
   let reopened: Awaited<ReturnType<typeof fixture>> | undefined;
   const child = spawn(
     process.execPath,
@@ -48,7 +49,8 @@ test("SIGKILL recovery preserves the admitted task and message-ID binding", asyn
     text += String(chunk);
     if (text.length > 16_384) child.kill("SIGKILL");
   });
-  child.stderr.on("data", () => {}); // Only synthetic fixture diagnostics; do not leave a full child pipe blocked.
+  // Discard synthetic fixture diagnostics without leaving the child pipe blocked.
+  child.stderr.resume();
   const waitEvent = async (event: string) => {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {

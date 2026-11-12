@@ -58,13 +58,15 @@ import {
 import { peerName } from "./peers.ts";
 
 /** All adapter metadata is committed by the application's existing storage owner. */
+// Chord's JsonObject constraint relies on the implicit index signature of this type literal.
+// eslint-disable-next-line @typescript-eslint/consistent-type-definitions -- The equivalent interface lacks that implicit signature for optional peer.
 type TaskRecord = {
   scope: string;
   peer?: string;
   conversationId: number;
   submissionId: number;
   settledId: number;
-  task: { [key: string]: JsonValue } | null;
+  task: Record<string, JsonValue> | null;
 };
 const Tasks = defineDocFamily<TaskRecord, null>({
   kind: "pi-a2a.task",
@@ -123,10 +125,27 @@ const hash = (value: unknown) =>
   createHash("sha256").update(JSON.stringify(value)).digest("hex");
 // Chord returns tracked JSON values: SDK metadata can retain their proxies.
 // Materialize across the codec boundary before returning or cloning a task.
-const materialize = <T>(value: T): T => JSON.parse(JSON.stringify(value));
+const materialize = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const decodeTask = (value: unknown) => Task.fromJSON(materialize(value));
 const jsonTask = (value: Task) =>
-  materialize(Task.toJSON(value)) as { [key: string]: JsonValue };
+  materialize(Task.toJSON(value)) as Record<string, JsonValue>;
+interface PageCursor {
+  filter: string;
+  timestamp: string;
+  id: string;
+}
+function isPageCursor(value: unknown): value is PageCursor {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "filter" in value &&
+    typeof value.filter === "string" &&
+    "timestamp" in value &&
+    typeof value.timestamp === "string" &&
+    "id" in value &&
+    typeof value.id === "string"
+  );
+}
 const now = () => new Date().toISOString();
 const textDigest = (text: string) =>
   createHash("sha256").update(text).digest("hex");
@@ -158,9 +177,9 @@ function progressText(live: LiveState): string {
   )
     return `${typeof details.taskId === "string" ? "Waiting for" : "Contacting"} peer ${details.agent}`;
   if (live.tools?.length)
-    return `Running tools (${live.tools.filter((tool) => tool.status === "done").length}/${live.tools.length} complete)`;
+    return `Running tools (${String(live.tools.filter((tool) => tool.status === "done").length)}/${String(live.tools.length)} complete)`;
   if (live.generation)
-    return `Generating response (turn ${(live.run?.turns ?? 0) + 1}, attempt ${live.generation.attempt})`;
+    return `Generating response (turn ${String((live.run?.turns ?? 0) + 1)}, attempt ${String(live.generation.attempt)})`;
   return "Working";
 }
 function malformed(message: string): never {
@@ -271,6 +290,8 @@ export class DurableA2A implements A2ARequestHandler {
     if (
       options.whenBusy !== undefined &&
       options.whenBusy !== "steer" &&
+      // Keep rejecting invalid values from untyped JavaScript callers.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- The public union is compile-time only; runtime callers can still supply another value.
       options.whenBusy !== "followUp"
     )
       throw new Error("Unsupported busy admission mode.");
@@ -287,9 +308,11 @@ export class DurableA2A implements A2ARequestHandler {
     if ((options.pollIntervalMs ?? 250) < 1)
       throw new Error("pollIntervalMs must be positive.");
   }
+  // eslint-disable-next-line @typescript-eslint/require-await -- Keep clone failures as rejected promises per the SDK method contract.
   async getAgentCard(): Promise<AgentCard> {
     return structuredClone(this.options.card);
   }
+  // eslint-disable-next-line @typescript-eslint/require-await -- Keep the unsupported-operation failure as a rejected promise per the SDK contract.
   async getAuthenticatedExtendedAgentCard(): Promise<AgentCard> {
     throw new UnsupportedOperationError();
   }
@@ -305,7 +328,8 @@ export class DurableA2A implements A2ARequestHandler {
         "The requested tenant does not match the authenticated call context.",
       );
     const identity = { userId: context.user.userName, tenant };
-    if (this.peer(identity) && tenant !== this.options.mesh!.owner.tenant)
+    const mesh = this.options.mesh;
+    if (this.peer(identity) && mesh && tenant !== mesh.owner.tenant)
       throw new TaskNotFoundError();
     return { identity, scope: hash(identity) };
   }
@@ -350,8 +374,7 @@ export class DurableA2A implements A2ARequestHandler {
     );
     const submission = await handle?.status(this.context);
     if (
-      !submission ||
-      submission.type !== "input" ||
+      submission?.type !== "input" ||
       submission.conversationId !== conversation.id
     )
       malformed("Existing submission does not belong to this conversation.");
@@ -369,6 +392,8 @@ export class DurableA2A implements A2ARequestHandler {
         return;
       }
       const owner = await tx.doc(Owners, scope, null);
+      // An empty persisted context ID is treated as missing, as before.
+      // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- Keep the existing empty-string fallback semantics.
       const contextId = owner.contexts[String(conversation.id)] || randomUUID();
       const binding = await tx.doc(Contexts, contextId, null);
       if (
@@ -504,7 +529,7 @@ export class DurableA2A implements A2ARequestHandler {
         let phase: string | undefined;
         try {
           phase = block.textSignature
-            ? JSON.parse(block.textSignature).phase
+            ? (JSON.parse(block.textSignature) as { phase?: string }).phase
             : undefined;
         } catch {
           /* Other providers use opaque signatures. */
@@ -583,7 +608,7 @@ export class DurableA2A implements A2ARequestHandler {
         };
         if (answer !== undefined) {
           const reply = Message.fromJSON({
-            messageId: `answer-${submission.id}`,
+            messageId: `answer-${String(submission.id)}`,
             contextId: value.contextId,
             taskId: id,
             role: "ROLE_AGENT",
@@ -617,7 +642,7 @@ export class DurableA2A implements A2ARequestHandler {
     const { identity, scope } = this.identity(context, params.tenant);
     const peer = this.peer(identity);
     const message = params.message;
-    if (!message || message.role !== Role.ROLE_USER || !message.parts.length)
+    if (message?.role !== Role.ROLE_USER || !message.parts.length)
       malformed("Send a user message with text parts.");
     checkId(message.messageId);
     const textParts: string[] = [];
@@ -694,7 +719,10 @@ export class DurableA2A implements A2ARequestHandler {
     const inputIdentity: unknown[] = [
       text,
       images.map((image) => [image.mimeType, image.data.toString("base64")]),
+      // Preserve absent wire IDs as explicit nulls in the binding fingerprint.
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Generated SDK types hide optional runtime JSON fields.
       message.contextId ?? null,
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Generated SDK types hide optional runtime JSON fields.
       message.taskId ?? null,
     ];
     if (documents.length)
@@ -767,6 +795,8 @@ export class DurableA2A implements A2ARequestHandler {
       if (message.contextId && message.contextId !== task.contextId)
         malformed("taskId and contextId do not match.");
     }
+    // Keep empty task context IDs falling back to the request context.
+    // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- Preserve existing truthy fallback behavior for malformed runtime values.
     const requestedContext = task?.contextId || message.contextId;
     let conversation: Conversation;
     if (requestedContext) {
@@ -810,6 +840,7 @@ export class DurableA2A implements A2ARequestHandler {
       const owner = await tx.doc(Owners, scope, null);
       const contextId =
         requestedContext ||
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- Preserve empty stored IDs as missing.
         owner.contexts[String(conversation.id)] ||
         randomUUID();
       const binding = await tx.doc(Contexts, contextId, null);
@@ -881,7 +912,13 @@ export class DurableA2A implements A2ARequestHandler {
           metadata: {
             messageId: message.messageId,
             ...(peer
-              ? { "pi-a2a.peer": { from: peer, to: this.options.mesh!.name } }
+              ? {
+                  "pi-a2a.peer": {
+                    from: peer,
+                    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Peer provenance is only constructed for authenticated mesh identities.
+                    to: this.options.mesh!.name,
+                  },
+                }
               : {}),
           },
         },
@@ -907,6 +944,7 @@ export class DurableA2A implements A2ARequestHandler {
       owner.contexts[String(conversation.id)] = contextId;
       if (!owner.ids.includes(proposedTaskId)) owner.ids.push(proposedTaskId);
       if (peer) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- Peer identities require mesh ownership; preserve the owner-scope lookup in this transaction.
         const human = await tx.doc(Owners, this.ownerScope()!, null);
         if (!human.ids.includes(proposedTaskId)) human.ids.push(proposedTaskId);
       }
@@ -1064,11 +1102,8 @@ export class DurableA2A implements A2ARequestHandler {
     context: ServerCallContext,
   ): Promise<ListTasksResponse> {
     this.validateHistory(params.historyLength);
-    if (
-      !Number.isInteger(params.status) ||
-      params.status < 0 ||
-      params.status > 8
-    )
+    const status: number = params.status;
+    if (!Number.isInteger(status) || status < 0 || status > 8)
       malformed("Invalid task state filter.");
     const { scope } = this.identity(context, params.tenant);
     const pageSize = params.pageSize ?? 50;
@@ -1085,22 +1120,19 @@ export class DurableA2A implements A2ARequestHandler {
       params.status,
       params.statusTimestampAfter ?? "",
     ]);
-    let cursor: { filter: string; timestamp: string; id: string } | undefined;
+    let cursor: PageCursor | undefined;
     if (params.pageToken) {
       try {
         if (params.pageToken.length > 2048) throw new Error();
-        cursor = JSON.parse(
+        const parsed: unknown = JSON.parse(
           Buffer.from(params.pageToken, "base64url").toString(),
         );
+        if (isPageCursor(parsed)) cursor = parsed;
       } catch {
         malformed("Invalid page token.");
       }
-      if (
-        !cursor ||
-        cursor.filter !== filter ||
-        typeof cursor.timestamp !== "string" ||
-        typeof cursor.id !== "string"
-      )
+      if (!cursor) malformed("Page token does not match this query.");
+      if (cursor.filter !== filter)
         malformed("Page token does not match this query.");
     }
     const owner = await this.options.harness.snapshot(

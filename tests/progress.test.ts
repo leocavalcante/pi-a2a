@@ -60,7 +60,9 @@ function status(
 
 test("progress retains elapsed watching time across admission, animates, and ages only received events", async (t) => {
   const h = display();
-  t.after(() => h.ui.clear());
+  t.after(() => {
+    h.ui.clear();
+  });
   h.ui.update("intent", "dj", undefined, { phase: "sending" });
   assert.match(h.text(), /Sending request/);
   assert.match(h.text(), /no remote update yet/);
@@ -89,13 +91,15 @@ test("progress retains elapsed watching time across admission, animates, and age
 
 test("remote statuses and IDs are bounded, single-line, terminal-safe text; final answers stay out of progress", (t) => {
   const h = display();
-  t.after(() => h.ui.clear());
+  t.after(() => {
+    h.ui.clear();
+  });
   h.ui.update("task", "dj", "\u001b]52;c;synthetic\u0007", {
     status: status("\u001b[2J\u009b\u202e\n" + "😀".repeat(2000)),
   });
   assert.doesNotMatch(
     h.text(),
-    /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202e]/,
+    /[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u202e]/, // eslint-disable-line no-control-regex -- This regex asserts terminal controls are removed from rendered progress.
   );
   assert.ok(Buffer.byteLength(h.text()) < 900);
   assert.ok(!h.text().includes("\ufffd"));
@@ -114,10 +118,12 @@ test("remote statuses and IDs are bounded, single-line, terminal-safe text; fina
 
 test("concurrent tasks have independent rows, bounded height, and honest paused/ready states", (t) => {
   const h = display();
-  t.after(() => h.ui.clear());
+  t.after(() => {
+    h.ui.clear();
+  });
   for (let i = 0; i < 7; i++)
-    h.ui.update(`key-${i}`, "dj", `task-${i}`, {
-      status: status(`Stage ${i}`),
+    h.ui.update(`key-${String(i)}`, "dj", `task-${String(i)}`, {
+      status: status(`Stage ${String(i)}`),
     });
   assert.match(h.text(), /\+2 more tasks/);
   assert.equal(h.text().split("\n").length, 12);
@@ -131,7 +137,7 @@ test("concurrent tasks have independent rows, bounded height, and honest paused/
   h.ui.remove("key-0");
   assert.doesNotMatch(h.text(), /task-0/);
   assert.match(h.text(), /task-1/);
-  for (let i = 1; i < 7; i++) h.ui.remove(`key-${i}`);
+  for (let i = 1; i < 7; i++) h.ui.remove(`key-${String(i)}`);
   assert.equal(h.text(), "");
 });
 

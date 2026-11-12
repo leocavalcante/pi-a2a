@@ -7,20 +7,21 @@ export interface ProgressUpdate {
   status?: TaskStatus;
   artifact?: boolean;
 }
-type Row = {
+interface Row {
   agent: string;
   taskId?: string;
   started: number;
   received?: number;
   phase: NonNullable<ProgressUpdate["phase"]>;
   message: string;
-};
+}
 const widget = "pi-a2a-progress";
-const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const;
 // Remote status is untrusted plain text, not terminal commands, Markdown, or model context.
 const plain = (text: string) =>
   boundedText(text, 512)
     .text.replace(
+      // eslint-disable-next-line no-control-regex -- Remove terminal control and bidi characters from remote data.
       /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u206f\ufeff]/g,
       " ",
     )
@@ -29,8 +30,8 @@ const plain = (text: string) =>
 const duration = (milliseconds: number) => {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   return seconds < 60
-    ? `${seconds}s`
-    : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    ? `${String(seconds)}s`
+    : `${String(Math.floor(seconds / 60))}m ${String(seconds % 60)}s`;
 };
 
 /** Ephemeral, session-local UI only. No model calls, transcript writes, or remote polling. */
@@ -89,11 +90,10 @@ export class ProgressDisplay {
       row.message = "Receiving result";
     }
     this.rows.set(key, row);
-    if (!this.timer)
-      this.timer = setInterval(() => {
-        this.frame++;
-        this.render();
-      }, 200).unref();
+    this.timer ??= setInterval(() => {
+      this.frame++;
+      this.render();
+    }, 200).unref();
     this.render();
   }
   remove(key: string): void {
@@ -139,7 +139,7 @@ export class ProgressDisplay {
         ? "!"
         : ready
           ? "✓"
-          : frames[this.frame % frames.length];
+          : (frames[this.frame % frames.length] ?? "⠋");
       const message =
         row.phase === "sending"
           ? "Sending request"
@@ -172,7 +172,9 @@ export class ProgressDisplay {
       );
     }
     if (this.rows.size > 5)
-      lines.push(theme.fg("dim", `  +${this.rows.size - 5} more tasks`));
+      lines.push(
+        theme.fg("dim", `  +${String(this.rows.size - 5)} more tasks`),
+      );
     // Pi's built-in text widget handles wrapping and terminal widths; use the active theme each render.
     ctx.ui.setWidget(widget, lines);
   }

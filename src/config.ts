@@ -39,26 +39,27 @@ export async function readAgentConfig(file?: string): Promise<AgentConfig> {
     throw new LocalA2AError("CONFIGURATION_UNREADABLE");
   }
   try {
-    const value = JSON.parse(text);
+    const parsed: unknown = JSON.parse(text);
     if (
-      !value ||
-      Object.keys(value).join() !== "agents" ||
-      !value.agents ||
-      typeof value.agents !== "object" ||
-      Array.isArray(value.agents)
+      !parsed ||
+      typeof parsed !== "object" ||
+      Object.keys(parsed).join() !== "agents"
     )
       throw new Error();
-    for (const [name, target] of Object.entries(value.agents) as [
-      string,
-      AgentTarget,
-    ][]) {
-      if (
-        !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name) ||
-        !target ||
-        typeof target !== "object" ||
-        Array.isArray(target)
-      )
+    const root = parsed as { agents?: unknown };
+    if (
+      !root.agents ||
+      typeof root.agents !== "object" ||
+      Array.isArray(root.agents)
+    )
+      throw new Error();
+    for (const [name, value] of Object.entries(
+      root.agents as Record<string, unknown>,
+    )) {
+      if (!value || typeof value !== "object" || Array.isArray(value))
         throw new Error();
+      const target = value as AgentTarget;
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(name)) throw new Error();
       if (
         Object.keys(target).some(
           (key) =>
@@ -105,7 +106,7 @@ export async function readAgentConfig(file?: string): Promise<AgentConfig> {
       )
         throw new Error();
     }
-    return value;
+    return parsed as AgentConfig;
   } catch {
     throw new LocalA2AError("INVALID_CONFIGURATION");
   }
@@ -140,7 +141,9 @@ export async function configuredAgent(
             try {
               if (target.bearerTokenFile)
                 token = await credentialFile(target.bearerTokenFile);
-              else token = process.env[target.bearerTokenEnv!];
+              else if (target.bearerTokenEnv)
+                token = process.env[target.bearerTokenEnv];
+              else throw new LocalA2AError("CREDENTIAL_MISSING");
             } catch {
               throw new LocalA2AError("CREDENTIAL_MISSING");
             }
