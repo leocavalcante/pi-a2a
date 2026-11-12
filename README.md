@@ -271,7 +271,7 @@ A real application supplies its own models, prompts, tools, credentials, environ
 
 ## npm publication
 
-The public package is `@leocavalcante/pi-a2a`. Version 0.4.0 was published by hand, without provenance; tag `v0.4.0` matches its published sources. Automated releases from `main`, with npm provenance, replace manual publishing. Until they are enabled, nothing publishes from this repository.
+Merging a releasable Conventional Commit to `main` publishes `@leocavalcante/pi-a2a` automatically, with npm provenance, and creates a GitHub release. The version on `main` is `0.0.0-development`; release versions live in tags and on npm. See [CONTRIBUTING.md](CONTRIBUTING.md) for release setup and recovery.
 
 ## Development and verification
 
