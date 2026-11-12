@@ -17,7 +17,7 @@ export function card(url: string, images = false, files = false, documents = fal
 }
 export async function fixture(options: {
   answers?: string[]; tokensPerSecond?: number; storage?: Storage; registry?: Registry; retries?: number;
-  mesh?: DurableA2AOptions["mesh"]; whenBusy?: DurableA2AOptions["whenBusy"]; validateInput?: DurableA2AOptions["validateInput"]; clientHeaders?: () => HeadersInit;
+  mesh?: DurableA2AOptions["mesh"]; whenBusy?: DurableA2AOptions["whenBusy"]; validateInput?: DurableA2AOptions["validateInput"]; clientHeaders?: () => NonNullable<ConstructorParameters<typeof Headers>[0]>;
   classifyAnswer?: DurableA2AOptions["classifyAnswer"]; http?: HttpOptions; images?: boolean; documents?: boolean; push?: DurableA2AOptions["push"]; fileArtifacts?: DurableA2AOptions["fileArtifacts"];
 } = {}) {
   const faux = fauxProvider({ tokensPerSecond: options.tokensPerSecond });

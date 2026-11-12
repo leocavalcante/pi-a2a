@@ -16,3 +16,4 @@ coverage/
 *.db-*
 .pi/
 .DS_Store
+.npmrc

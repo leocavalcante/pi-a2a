@@ -1,28 +1,30 @@
 {
   "name": "@leocavalcante/pi-a2a",
   "version": "0.4.0",
-  "description": "A2A communication for Pi Durable agents and Pi coding-agent sessions",
-  "type": "module",
-  "license": "MIT",
-  "publishConfig": {
-    "access": "public",
-    "provenance": true
+  "description": "Talk to A2A agents from Pi, and serve Pi Durable agents over the A2A protocol.",
+  "keywords": [
+    "pi-extension",
+    "pi-package",
+    "pi-coding-agent",
+    "pi-durable",
+    "a2a",
+    "a2a-protocol",
+    "agent-to-agent",
+    "agent-communication",
+    "multi-agent",
+    "ai-agents"
+  ],
+  "homepage": "https://github.com/leocavalcante/pi-a2a#readme",
+  "bugs": {
+    "url": "https://github.com/leocavalcante/pi-a2a/issues"
   },
-  "author": "leocavalcante",
   "repository": {
     "type": "git",
-    "url": "https://github.com/leocavalcante/pi-a2a.git"
+    "url": "git+https://github.com/leocavalcante/pi-a2a.git"
   },
-  "engines": {
-    "node": ">=22.19.0"
-  },
-  "keywords": [
-    "pi-package",
-    "a2a",
-    "pi",
-    "durable",
-    "agents"
-  ],
+  "license": "MIT",
+  "author": "Leo Cavalcante (https://github.com/leocavalcante)",
+  "type": "module",
   "exports": {
     ".": {
       "types": "./dist/client.d.ts",
@@ -42,11 +44,6 @@
     },
     "./extension": "./src/extension.ts"
   },
-  "pi": {
-    "extensions": [
-      "./src/extension.ts"
-    ]
-  },
   "files": [
     "dist",
     "src",
@@ -56,10 +53,14 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "tsc --noEmit",
-    "test": "node --import tsx --test --test-timeout=20000 --test-concurrency=1 tests/*.test.ts",
-    "example": "node --import tsx examples/echo.ts",
-    "prepack": "npm run build"
+    "check": "tsc -p tsconfig.json && tsc -p tests && tsc -p examples",
+    "test": "bun run test:bun && bun run test:node",
+    "test:bun": "bun run build && bun test --timeout 30000",
+    "test:node": "node --import jiti/register --test --test-timeout=30000 --test-concurrency=1 tests/*.node-test.ts",
+    "check:package": "bun run build && publint && node .github/scripts/check-package.mjs",
+    "verify": "bun run check && bun run test && bun run check:package && bun audit --audit-level=high",
+    "example": "node --import jiti/register examples/echo.ts",
+    "prepack": "bun run build"
   },
   "dependencies": {
     "@a2a-js/sdk": "1.3.0",
@@ -90,11 +91,28 @@
     "@earendil-works/pi-ai": "1.5.0",
     "@earendil-works/pi-coding-agent": "1.5.0",
     "@earendil-works/pi-durable": "1.5.0",
-    "@types/express": "^5.0.6",
-    "@types/node": "^22.19.0",
-    "express": "^5.1.0",
-    "tsx": "^4.20.6",
-    "typebox": "^1.0.0",
-    "typescript": "5.9.3"
+    "@types/bun": "1.4.4",
+    "@types/express": "5.0.6",
+    "@types/node": "22.20.5",
+    "express": "5.1.0",
+    "jiti": "2.7.0",
+    "publint": "0.3.25",
+    "typebox": "1.4.4",
+    "typescript": "6.0.3",
+    "yaml": "2.9.1"
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "packageManager": "bun@1.4.4",
+  "trustedDependencies": [],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "pi": {
+    "extensions": [
+      "./src/extension.ts"
+    ]
   }
 }

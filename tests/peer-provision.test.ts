@@ -8,12 +8,16 @@ import { join } from "node:path";
 import { provisionPeers } from "../examples/mesh/provision.mjs";
 import { readAgentConfig } from "../src/config.ts";
 
+// The example protects credentials with POSIX file modes. Windows has no
+// equivalent modes, so the example refuses to run there (tested below).
+const posixOnly = process.platform === "win32" && "requires POSIX file permissions";
+
 const equalFiles = async (left: string, right: string) => {
   const a = await readFile(left), b = await readFile(right);
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-test("peer provisioning is private, directional, idempotent and additive without rotating existing credentials", async t => {
+test("peer provisioning is private, directional, idempotent and additive without rotating existing credentials", { skip: posixOnly }, async t => {
   const root = await mkdtemp(join(tmpdir(), "a2a-provision-")); t.after(() => rm(root, { recursive: true }));
   const directory = join(root, "directory.json"), output = join(root, "private");
   const agents: Record<string, { url: string }> = { alpha: { url: "https://alpha.example.invalid" }, beta: { url: "https://beta.example.invalid" } };
@@ -45,7 +49,7 @@ test("peer provisioning is private, directional, idempotent and additive without
   assert.equal(timingSafeEqual(retained, await readFile(sender)), true);
 });
 
-test("conflicting retained keys, inline credentials, unsafe modes and Git destinations fail without overwriting keys", async t => {
+test("conflicting retained keys, inline credentials, unsafe modes and Git destinations fail without overwriting keys", { skip: posixOnly }, async t => {
   const root = await mkdtemp(join(tmpdir(), "a2a-provision-refusal-")); t.after(() => rm(root, { recursive: true }));
   const directory = join(root, "directory.json"), output = join(root, "private");
   const agents = { alpha: { url: "https://alpha.example.invalid" }, beta: { url: "https://beta.example.invalid" } };
@@ -62,4 +66,12 @@ test("conflicting retained keys, inline credentials, unsafe modes and Git destin
   await assert.rejects(provisionPeers(directory, join(repository, "credentials"), "/auth/a2a"), /outside Git/);
   await writeFile(directory, JSON.stringify({ agents: { ...agents, gamma: { url: "https://gamma.example.invalid", bearerTokenEnv: "UNUSED_SYNTHETIC" } } }));
   await assert.rejects(provisionPeers(directory, join(root, "not-written"), "/auth/a2a"), /endpoints only/);
+});
+
+test("peer provisioning fails closed where POSIX permissions are unavailable", { skip: process.platform !== "win32" && "Windows-only check" }, async t => {
+  const root = await mkdtemp(join(tmpdir(), "a2a-provision-")); t.after(() => rm(root, { recursive: true }));
+  const directory = join(root, "directory.json"), output = join(root, "private");
+  await writeFile(directory, JSON.stringify({ agents: { alpha: { url: "https://alpha.example.invalid" }, beta: { url: "https://beta.example.invalid" } } }));
+  await assert.rejects(provisionPeers(directory, output, "/auth/a2a"), /Unsafe private directory/);
+  await assert.rejects(stat(join(output, "alpha/beta.outgoing.token")), { code: "ENOENT" });
 });

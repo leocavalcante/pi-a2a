@@ -11,7 +11,7 @@ import { createRegistry, defineExtension, defineTool } from "@earendil-works/pi-
 import { fixture } from "./fixtures/agent.ts";
 import { createAgentSession, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager, type ExtensionAPI, type ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { registerA2A, type ExtensionOptions } from "../src/extension.ts";
-import { completionKind, history, watchKind, type Reply } from "../src/observation.ts";
+import { completionKind, watchKind, type Reply } from "../src/observation.ts";
 import { changedUntil, deferred, httpPeer, Peer } from "./fixtures/completion.ts";
 
 async function sdk(dir: string, options: ExtensionOptions, script: ReturnType<typeof fauxAssistantMessage>[], manager = SessionManager.inMemory(dir), extra?: (pi: ExtensionAPI) => void,
