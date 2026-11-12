@@ -71,15 +71,16 @@ test(
       "beta",
       "gamma",
     ]);
+    const gamma = config.agents.gamma;
+    const alpha = config.agents.alpha;
+    assert(gamma);
+    assert(alpha);
+    assert.equal(gamma.bearerTokenFile, "/auth/a2a/gamma.outgoing.token");
     assert.equal(
-      config.agents.gamma.bearerTokenFile,
-      "/auth/a2a/gamma.outgoing.token",
-    );
-    assert.equal(
-      config.agents.gamma.incomingBearerTokenFile,
+      gamma.incomingBearerTokenFile,
       "/auth/a2a/gamma.incoming.token",
     );
-    assert.equal(config.agents.alpha.bearerTokenFile, undefined);
+    assert.equal(alpha.bearerTokenFile, undefined);
     await unlink(receiver); // Synthetic interrupted provisioning: recover only from the validated retained counterpart.
     await provisionPeers(directory, output, "/auth/a2a");
     assert.equal(await equalFiles(sender, receiver), true);

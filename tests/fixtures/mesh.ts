@@ -32,7 +32,7 @@ export async function mesh(
   await writeFile(incoming, "synthetic-beta-to-alpha-credential", {
     mode: 0o600,
   });
-  const configs: Record<string, AgentConfig> = {
+  const configs: Record<"alpha" | "beta", AgentConfig> = {
     alpha: { agents: {} },
     beta: { agents: {} },
   };
@@ -64,7 +64,9 @@ export async function mesh(
     });
     node.adapter.options.card.name = name;
     node.adapter.options.card.description = `${name} synthetic specialist`;
-    node.adapter.options.card.skills[0].description =
+    const skill = node.adapter.options.card.skills[0];
+    if (!skill) throw new Error("The synthetic card needs a skill.");
+    skill.description =
       name === "beta"
         ? "Render precise synthetic charts from supplied numbers."
         : "Coordinate synthetic work.";
@@ -100,7 +102,9 @@ export async function mesh(
     ) => {
       await alpha.close();
       alpha = await make("alpha", await storage(), answers);
-      configs.beta.agents.alpha.url = alpha.baseUrl;
+      const sourceTarget = configs.beta.agents.alpha;
+      if (!sourceTarget) throw new Error("The source peer target is missing.");
+      sourceTarget.url = alpha.baseUrl;
       return alpha;
     },
     close: async () => {

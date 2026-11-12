@@ -140,7 +140,10 @@ test("concurrent identical message IDs admit once; changed text conflicts", asyn
   );
   assert.ok(replies.every(isTask));
   assert.equal(new Set(replies.map((reply) => reply.id)).size, 1);
-  await waitForTask(f.client, replies[0].id, { intervalMs: 10 });
+  const firstReply = replies[0];
+  assert(firstReply);
+  assert.ok(isTask(firstReply));
+  await waitForTask(f.client, firstReply.id, { intervalMs: 10 });
   await assert.rejects(
     sendText(f.client, "Changed", { messageId: "same-id" }),
     /message ID already belongs/,
@@ -255,7 +258,7 @@ test("a lost blocking response can be retried by message ID without a second adm
     returnImmediately: false,
     signal: controller.signal,
   });
-  const observed = pending.catch((error) => error);
+  const observed = pending.catch((error: unknown) => error);
   while (f.faux.state.callCount === 0) await delay(10);
   controller.abort();
   assert.ok((await observed) instanceof Error);
@@ -383,7 +386,8 @@ test("task ownership and unknown contexts fail closed", async (t) => {
 test("listing uses cursor pages, filtering and omitted artifacts", async (t) => {
   const f = await fixture({ answers: ["One", "Two", "Three"] });
   t.after(f.close);
-  for (let i = 0; i < 3; i++) await completed(f, `Text ${i}`, `page-${i}`);
+  for (let i = 0; i < 3; i++)
+    await completed(f, `Text ${String(i)}`, `page-${String(i)}`);
   const query = {
     tenant: "",
     contextId: "",
@@ -448,12 +452,10 @@ test("stream starts with a task, publishes a final artifact and can be reattache
     signal: controller.signal,
   });
   const first = await stream.next();
-  assert.equal(first.value?.payload?.$case, "task");
-  const task =
-    first.value!.payload!.$case === "task"
-      ? first.value!.payload!.value
-      : undefined;
-  assert.ok(task);
+  const payload = first.value?.payload;
+  assert(payload);
+  assert(payload.$case === "task");
+  const task = payload.value;
   controller.abort();
   await stream.return(undefined);
   const events = [];
@@ -462,7 +464,9 @@ test("stream starts with a task, publishes a final artifact and can be reattache
     tenant: "",
   }))
     events.push(event);
-  assert.equal(events[0].payload?.$case, "task");
+  const firstEvent = events[0];
+  assert(firstEvent);
+  assert.equal(firstEvent.payload?.$case, "task");
   assert.ok(events.some((event) => event.payload?.$case === "artifactUpdate"));
   assert.equal(
     (await waitForTask(f.client, task.id, { intervalMs: 10 })).status?.state,
@@ -522,8 +526,12 @@ test("progress is stable, submission-scoped, and reports completed tool counts w
           },
           async execute(args) {
             const index = (args as { index: number }).index;
-            entered[index].resolve();
-            await release[index].promise;
+            const enteredGate = entered[index];
+            const releaseGate = release[index];
+            assert(enteredGate);
+            assert(releaseGate);
+            enteredGate.resolve();
+            await releaseGate.promise;
             return {
               output: [{ type: "text", text: "synthetic-private-tool-output" }],
             };
@@ -534,7 +542,9 @@ test("progress is stable, submission-scoped, and reports completed tool counts w
   );
   const f = await fixture({ registry });
   t.after(async () => {
-    release.forEach((item) => item.resolve());
+    release.forEach((item) => {
+      item.resolve();
+    });
     await f.close();
   });
   f.faux.setResponses([
@@ -581,7 +591,9 @@ test("progress is stable, submission-scoped, and reports completed tool counts w
     /Running tools|synthetic-private/,
   );
   await f.client.cancelTask({ id: queued.id, tenant: "", metadata: undefined });
-  release[0].resolve();
+  const firstRelease = release[0];
+  assert(firstRelease);
+  firstRelease.resolve();
   await changedUntil(
     events,
     () =>
@@ -599,7 +611,9 @@ test("progress is stable, submission-scoped, and reports completed tool counts w
     advanced.status?.message?.messageId,
     first.status?.message?.messageId,
   );
-  release[1].resolve();
+  const secondRelease = release[1];
+  assert(secondRelease);
+  secondRelease.resolve();
   const done = await waitForTask(f.client, active.id, { intervalMs: 10 });
   assert.equal(textOf(done), "Final answer");
   assert.equal(f.faux.state.callCount, 2);

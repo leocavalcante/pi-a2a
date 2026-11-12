@@ -140,16 +140,17 @@ async function observe(
       (terminal(payload.value) || interrupted(payload.value))
     )
       break;
+    const terminalStates: number[] = [
+      TaskState.TASK_STATE_COMPLETED,
+      TaskState.TASK_STATE_FAILED,
+      TaskState.TASK_STATE_CANCELED,
+      TaskState.TASK_STATE_REJECTED,
+      TaskState.TASK_STATE_INPUT_REQUIRED,
+      TaskState.TASK_STATE_AUTH_REQUIRED,
+    ];
     if (
       payload.$case === "statusUpdate" &&
-      [
-        TaskState.TASK_STATE_COMPLETED,
-        TaskState.TASK_STATE_FAILED,
-        TaskState.TASK_STATE_CANCELED,
-        TaskState.TASK_STATE_REJECTED,
-        TaskState.TASK_STATE_INPUT_REQUIRED,
-        TaskState.TASK_STATE_AUTH_REQUIRED,
-      ].includes(payload.value.status?.state ?? 0)
+      terminalStates.includes(payload.value.status?.state ?? 0)
     )
       break;
   }
@@ -168,12 +169,11 @@ function summarize(
     (isTask(value) && (!value.id || Buffer.byteLength(value.id) > 1024))
   )
     throw new Error("Invalid peer task identity.");
+  const target = config.agents[agent];
+  if (!target) throw new LocalA2AError("AGENT_NOT_CONFIGURED");
   const origins = new Set(
-    [
-      config.agents[agent].url,
-      ...(config.agents[agent].allowedOrigins ?? []),
-    ].map(
-      (url) => endpoint(url, config.agents[agent].allowHttpLoopback).origin,
+    [target.url, ...(target.allowedOrigins ?? [])].map(
+      (url) => endpoint(url, target.allowHttpLoopback).origin,
     ),
   );
   const artifacts: JsonValue[] = [];
@@ -217,7 +217,12 @@ function summarize(
     agent,
     ...(messageId ? { messageId } : {}),
     ...(isTask(value)
-      ? { taskId: value.id, state: taskStateToJSON(value.status?.state ?? 0) }
+      ? {
+          taskId: value.id,
+          // Task and taskStateToJSON originate in distinct generated SDK declarations.
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-assignment -- Pass the SDK's numeric task state through unchanged.
+          state: taskStateToJSON(value.status?.state ?? 0),
+        }
       : { state: "MESSAGE" }),
     contextId: value.contextId,
     ...(artifacts.length || artifactsTruncated
@@ -257,6 +262,7 @@ export function createA2ATools(options: A2AToolsOptions = {}) {
     if (!Object.hasOwn(directory.agents, agent))
       throw new LocalA2AError("AGENT_NOT_CONFIGURED");
     const value = directory.agents[agent];
+    if (!value) throw new LocalA2AError("AGENT_NOT_CONFIGURED");
     return JSON.stringify([
       value.url,
       value.allowedOrigins ?? [],
@@ -318,7 +324,7 @@ export function createA2ATools(options: A2AToolsOptions = {}) {
             taskId?: string;
             wait?: boolean;
           };
-          const messageId = args.messageId ?? `a2a-${api.taskId}`;
+          const messageId = args.messageId ?? `a2a-${String(api.taskId)}`;
           let taskId: string | undefined,
             contextId: string | undefined,
             uncertain = false;
@@ -403,8 +409,8 @@ export function createA2ATools(options: A2AToolsOptions = {}) {
               )
                 value = await observe(
                   client,
-                  taskId!,
-                  contextId!,
+                  value.id,
+                  value.contextId,
                   context.abortSignal,
                 );
             }

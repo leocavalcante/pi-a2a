@@ -46,6 +46,7 @@ test("subscription authentication failures stay typed, sanitized and fail closed
       fetch: async (input, init) => {
         requests++;
         assert.equal(init?.redirect, "error");
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Fetch init is optional in the Node test type definitions.
         assert.ok(init?.signal);
         if (urlOf(input).pathname === "/.well-known/agent-card.json")
           return new Response(
@@ -80,7 +81,10 @@ test("an observer's independent abort signal also aborts discovery without disab
       return new Promise<Response>((_resolve, reject) => {
         init.signal!.addEventListener(
           "abort",
-          () => reject(init.signal!.reason),
+          () => {
+            // eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Mirror fetch rejecting with the abort signal's original reason.
+            reject(init.signal!.reason);
+          },
           { once: true },
         );
         started.resolve();

@@ -151,11 +151,20 @@ const states = new Set([
   "TASK_STATE_INPUT_REQUIRED",
   "TASK_STATE_AUTH_REQUIRED",
 ]);
+const terminalStates: number[] = [
+  TaskState.TASK_STATE_COMPLETED,
+  TaskState.TASK_STATE_FAILED,
+  TaskState.TASK_STATE_CANCELED,
+  TaskState.TASK_STATE_REJECTED,
+  TaskState.TASK_STATE_INPUT_REQUIRED,
+  TaskState.TASK_STATE_AUTH_REQUIRED,
+];
 
 export function fingerprint(config: AgentConfig, name: string): string {
   if (!Object.hasOwn(config.agents, name))
     throw new LocalA2AError("AGENT_NOT_CONFIGURED");
   const target = config.agents[name];
+  if (!target) throw new LocalA2AError("AGENT_NOT_CONFIGURED");
   endpoint(target.url, target.allowHttpLoopback);
   return hash(target.url);
 }
@@ -177,7 +186,12 @@ export function summarize(
     ...(messageId ? { messageId } : {}),
     contextId: value.contextId,
     ...(isTask(value)
-      ? { taskId: value.id, state: taskStateToJSON(value.status?.state ?? 0) }
+      ? {
+          taskId: value.id,
+          // Task and taskStateToJSON originate in distinct generated SDK declarations.
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-enum-assignment -- Pass the SDK's numeric task state through unchanged.
+          state: taskStateToJSON(value.status?.state ?? 0),
+        }
       : { state: "MESSAGE" }),
     text,
     truncated,
@@ -219,6 +233,7 @@ export function readyRecord(record: Pending, value: Task): Ready {
       truncated: true,
     };
   }
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- Exclude phase from the delivery identity payload.
   const { phase: _phase, ...identity } = record;
   const clean = {
     version: identity.version,
@@ -422,16 +437,7 @@ export async function observeTask(
                 productive = true;
               lastStatus = next;
             }
-            if (
-              [
-                TaskState.TASK_STATE_COMPLETED,
-                TaskState.TASK_STATE_FAILED,
-                TaskState.TASK_STATE_CANCELED,
-                TaskState.TASK_STATE_REJECTED,
-                TaskState.TASK_STATE_INPUT_REQUIRED,
-                TaskState.TASK_STATE_AUTH_REQUIRED,
-              ].includes(payload.value.status?.state ?? 0)
-            )
+            if (terminalStates.includes(payload.value.status?.state ?? 0))
               break;
             timing.onProgress?.({
               phase: "observing",
@@ -465,6 +471,8 @@ export async function observeTask(
           "statusCode" in streamError &&
           [401, 403].includes(Number(streamError.statusCode)))
       )
+        // Rethrow the transport failure unchanged: safeError() and callers classify the original value.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the original remote failure object for safeError and callers.
         throw streamError;
       const current = correlate(
         await client.getTask(
@@ -480,7 +488,11 @@ export async function observeTask(
         productive = true;
         previous = next;
       }
-      if (streamError && permanent(streamError)) throw streamError;
+      if (streamError && permanent(streamError)) {
+        // Rethrow the transport failure unchanged: safeError() and callers classify the original value.
+        // eslint-disable-next-line @typescript-eslint/only-throw-error -- Preserve the original remote failure object for safeError and callers.
+        throw streamError;
+      }
     } catch (error) {
       signal.throwIfAborted();
       if (permanent(error)) throw error;
@@ -808,16 +820,18 @@ export class WatchController {
     });
   }
   private acknowledge(record: Ready, generation: number): boolean {
+    const ctx = this.ctx;
     if (
+      !ctx ||
       !this.active(record, generation) ||
-      !history(this.ctx!).delivered.has(record.deliveryKey)
+      !history(ctx).delivered.has(record.deliveryKey)
     )
       return false;
     this.display.remove(keyOf(record));
     if (this.queued.delete(record.deliveryKey) && record.policy === "display") {
       try {
-        this.ctx!.ui.notify(
-          `A2A response available from ${JSON.stringify(record.agent)} (${record.reply.state}).`,
+        ctx.ui.notify(
+          `A2A response available from ${JSON.stringify(record.agent)} (${String(record.reply.state)}).`,
           "info",
         );
       } catch {

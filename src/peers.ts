@@ -6,6 +6,7 @@ import {
   credentialFile,
   readAgentConfig,
   type AgentConfig,
+  type AgentTarget,
 } from "./config.ts";
 import type { HttpOptions } from "./server.ts";
 
@@ -36,12 +37,15 @@ export function peerBearerAuth(
     if (!own || /[\r\n]/.test(own)) return undefined;
     if (match(own)) return owner;
     const entries = Object.entries((await config()).agents).filter(
-      ([, target]) => target.incomingBearerTokenFile,
+      (
+        entry,
+      ): entry is [string, AgentTarget & { incomingBearerTokenFile: string }] =>
+        Boolean(entry[1].incomingBearerTokenFile),
     );
     const peers = await Promise.all(
       entries.map(async ([name, target]) => ({
         name,
-        token: await credentialFile(target.incomingBearerTokenFile!),
+        token: await credentialFile(target.incomingBearerTokenFile),
       })),
     );
     const matches = peers.filter(
@@ -51,7 +55,9 @@ export function peerBearerAuth(
         value.token !== own &&
         match(value.token),
     );
-    return matches.length === 1 ? `peer:${matches[0].name}` : undefined;
+    if (matches.length !== 1) return undefined;
+    const [peerMatch] = matches;
+    return peerMatch ? `peer:${peerMatch.name}` : undefined;
   };
 }
 
@@ -60,6 +66,8 @@ export async function guardPeerData(
   value: unknown,
   config: AgentConfig,
 ): Promise<void> {
+  // JSON.stringify returns undefined for top-level undefined/symbol runtime inputs.
+  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Keep the fail-closed serialization fallback for unknown input.
   const serialized = JSON.stringify(value) ?? "";
   for (const target of Object.values(config.agents)) {
     const tokens: string[] = [];
@@ -102,6 +110,8 @@ function describe(agent: string, card: AgentCard): PeerDescription {
     truncated ||= values.length > 32;
     return values.slice(0, 32).map((value) => trim(value, 128));
   };
+  const inputModes = modes(card.defaultInputModes);
+  const outputModes = modes(card.defaultOutputModes);
   const skills = card.skills.slice(0, 32).map((skill) => ({
     id: trim(skill.id, 128),
     name: trim(skill.name, 256),
@@ -116,8 +126,8 @@ function describe(agent: string, card: AgentCard): PeerDescription {
     name: trim(card.name, 256),
     description: trim(card.description, 2048),
     version: trim(card.version, 128),
-    inputModes: modes(card.defaultInputModes),
-    outputModes: modes(card.defaultOutputModes),
+    inputModes,
+    outputModes,
     streaming: Boolean(card.capabilities?.streaming),
     pushNotifications: Boolean(card.capabilities?.pushNotifications),
     skills,
@@ -128,12 +138,9 @@ function describe(agent: string, card: AgentCard): PeerDescription {
   }
   while (
     Buffer.byteLength(JSON.stringify(result)) > 8192 &&
-    (result.inputModes!.length || result.outputModes!.length)
+    (inputModes.length || outputModes.length)
   ) {
-    (result.inputModes!.length > result.outputModes!.length
-      ? result.inputModes!
-      : result.outputModes!
-    ).pop();
+    (inputModes.length > outputModes.length ? inputModes : outputModes).pop();
     truncated = true;
   }
   return { ...result, truncated };
@@ -171,7 +178,7 @@ export async function discoverAgents(
           await client.getAgentCard({ signal: options.signal }),
         );
       } catch (error) {
-        return { agent, error: safeError(error) } as PeerDescription;
+        return { agent, error: safeError(error) };
       }
     }),
   );

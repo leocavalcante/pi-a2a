@@ -8,9 +8,27 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const requested = process.argv[2];
+interface PackageManifest {
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+  engines?: { pi?: string };
+}
+
+const manifest = JSON.parse(
+  readFileSync("package.json", "utf8"),
+) as PackageManifest;
+
+// "min" reads the minimum supported Pi from `engines.pi` (for example ">=1.1.0"),
+// so the shared CI workflow needs no repository-specific version.
+let requested = process.argv[2];
+if (requested === "min") {
+  requested = /^>=\s*(\d+\.\d+\.\d+)$/.exec(manifest.engines?.pi ?? "")?.[1];
+  if (!requested) {
+    throw new Error('Declare the minimum Pi as engines.pi ">=x.y.z".');
+  }
+}
 if (!requested || !/^(?:latest|\d+\.\d+\.\d+)$/.test(requested)) {
-  throw new Error("Expected a stable Pi version or latest.");
+  throw new Error("Expected min, latest, or a stable Pi version.");
 }
 
 let version = requested;
@@ -21,20 +39,20 @@ if (requested === "latest") {
       signal: AbortSignal.timeout(15000),
     },
   );
-  if (!response.ok) throw new Error(`Registry returned ${response.status}`);
+  if (!response.ok)
+    throw new Error(`Registry returned ${String(response.status)}`);
   const metadata = (await response.json()) as { version: string };
   version = metadata.version;
   if (!/^\d+\.\d+\.\d+$/.test(version))
     throw new Error("Expected a stable Pi version.");
 }
 
-const manifest = JSON.parse(readFileSync("package.json", "utf8"));
 for (const [name] of Object.entries(manifest.devDependencies)) {
   if (name.startsWith("@earendil-works/"))
     manifest.devDependencies[name] = version;
 }
-// Keep runtime dependencies pinned: test the requested Pi SDK against the
-// runtime dependencies this package actually ships.
+// Keep runtime dependencies pinned: test the Pi version consumers use with the
+// runtime dependencies this package ships.
 const directory = mkdtempSync(join(tmpdir(), "pi-sdk-"));
 try {
   writeFileSync(

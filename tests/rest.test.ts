@@ -16,7 +16,9 @@ import { card } from "./fixtures/agent.ts";
 
 test("client negotiates an HTTP+JSON/REST-only non-Pi peer", async (t) => {
   const agentCard = card("http://127.0.0.1:1/rest");
-  agentCard.supportedInterfaces[0].protocolBinding = "HTTP+JSON";
+  const restInterface = agentCard.supportedInterfaces[0];
+  assert(restInterface);
+  restInterface.protocolBinding = "HTTP+JSON";
   const handler = new DefaultRequestHandler(
     agentCard,
     new InMemoryTaskStore(),
@@ -57,11 +59,13 @@ test("client negotiates an HTTP+JSON/REST-only non-Pi peer", async (t) => {
     () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
-        server.close(() => resolve());
+        server.close(() => {
+          resolve();
+        });
       }),
   );
-  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  agentCard.supportedInterfaces[0].url = `${url}/rest`;
+  const url = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  restInterface.url = `${url}/rest`;
   const client = await connectAgent(url, { allowHttpLoopback: true });
   assert.equal(
     textOf(

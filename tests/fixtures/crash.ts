@@ -1,8 +1,10 @@
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { fixture } from "./agent.ts";
 
+const database = process.argv[2];
+if (!database) throw new Error("Expected the crash-test database path.");
 const f = await fixture({
-  storage: await openNodeSqliteStorage(process.argv[2]),
+  storage: await openNodeSqliteStorage(database),
   tokensPerSecond: 1,
   retries: 1,
   answers: [

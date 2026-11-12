@@ -34,11 +34,9 @@ export async function changedUntil(
   condition: () => boolean,
 ): Promise<void> {
   const abort = new AbortController();
-  const deadline = setTimeout(
-    () =>
-      abort.abort(new Error("Synthetic completion condition was not reached.")),
-    4000,
-  );
+  const deadline = setTimeout(() => {
+    abort.abort(new Error("Synthetic completion condition was not reached."));
+  }, 4000);
   try {
     while (!condition()) await once(events, "change", { signal: abort.signal });
   } finally {
@@ -104,8 +102,12 @@ export class Peer {
       sendMessage: async (request: SendMessageRequest) => {
         this.sent.push(structuredClone(request));
         if (this.direct) return structuredClone(this.direct);
-        const id = request.message?.taskId || `task-${this.sent.length}`,
-          contextId = request.message?.contextId || "context-1";
+        // Preserve the existing empty-ID fallback behavior for these synthetic requests.
+        const id =
+          // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- Empty IDs already trigger this fallback.
+          request.message?.taskId || `task-${String(this.sent.length)}`;
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- Empty context IDs already trigger this fallback.
+        const contextId = request.message?.contextId || "context-1";
         const value = task(TaskState.TASK_STATE_WORKING, "", id, contextId);
         this.tasks.set(id, value);
         this.events.emit("change");
@@ -143,7 +145,7 @@ export class Peer {
         yield* this.stream(id, signal);
         return;
       }
-      const queue = { items: [] as StreamResponse[], wake: () => {} };
+      const queue = { items: [] as StreamResponse[], wake: () => undefined };
       let queues = this.queues.get(id);
       if (!queues) this.queues.set(id, (queues = new Set()));
       queues.add(queue);
@@ -155,15 +157,19 @@ export class Peer {
           signal.throwIfAborted();
           if (!queue.items.length) {
             const next = deferred();
-            queue.wake = () => next.resolve();
-            const abort = () => next.reject(signal.reason);
+            queue.wake = () => {
+              next.resolve();
+            };
+            const abort = () => {
+              next.reject(signal.reason);
+            };
             signal.addEventListener("abort", abort, { once: true });
             try {
               signal.throwIfAborted();
               await next.promise;
             } finally {
               signal.removeEventListener("abort", abort);
-              queue.wake = () => {};
+              queue.wake = () => undefined;
             }
           }
           while (queue.items.length) yield queue.items.shift()!;
@@ -261,8 +267,11 @@ export async function httpPeer() {
   );
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
-  const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  agentCard.supportedInterfaces[0].url = `${baseUrl}/a2a`;
+  const baseUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
+  const supportedInterface = agentCard.supportedInterfaces[0];
+  if (!supportedInterface)
+    throw new Error("The synthetic card needs an interface.");
+  supportedInterface.url = `${baseUrl}/a2a`;
   return {
     baseUrl,
     release,
@@ -272,7 +281,11 @@ export async function httpPeer() {
     close: async () => {
       release.resolve("Synthetic fixture cleanup");
       server.closeAllConnections();
-      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await new Promise<void>((resolve) =>
+        server.close(() => {
+          resolve();
+        }),
+      );
     },
   };
 }

@@ -147,7 +147,7 @@ export async function connectAgent(
       return response;
     const chunks: Uint8Array[] = [];
     let bytes = 0;
-    for await (const chunk of response.body) {
+    for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
       bytes += chunk.byteLength;
       if (bytes > 2 * 1024 * 1024)
         throw new LocalA2AError("RESPONSE_TOO_LARGE");
@@ -220,19 +220,21 @@ export function streamText(
 export function isTask(value: Message | Task): value is Task {
   return "id" in value;
 }
+const terminalStates: number[] = [
+  TaskState.TASK_STATE_COMPLETED,
+  TaskState.TASK_STATE_FAILED,
+  TaskState.TASK_STATE_CANCELED,
+  TaskState.TASK_STATE_REJECTED,
+];
+const interruptedStates: number[] = [
+  TaskState.TASK_STATE_INPUT_REQUIRED,
+  TaskState.TASK_STATE_AUTH_REQUIRED,
+];
 export function terminal(task: Task): boolean {
-  return [
-    TaskState.TASK_STATE_COMPLETED,
-    TaskState.TASK_STATE_FAILED,
-    TaskState.TASK_STATE_CANCELED,
-    TaskState.TASK_STATE_REJECTED,
-  ].includes(task.status?.state ?? 0);
+  return terminalStates.includes(task.status?.state ?? 0);
 }
 export function interrupted(task: Task): boolean {
-  return [
-    TaskState.TASK_STATE_INPUT_REQUIRED,
-    TaskState.TASK_STATE_AUTH_REQUIRED,
-  ].includes(task.status?.state ?? 0);
+  return interruptedStates.includes(task.status?.state ?? 0);
 }
 export function textOf(value: Message | Task): string {
   const artifacts = isTask(value)

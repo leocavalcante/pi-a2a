@@ -55,7 +55,7 @@ const card = AgentCard.fromJSON({
   description: "A persistent agent with a scripted local provider",
   supportedInterfaces: [
     {
-      url: `http://127.0.0.1:${port}/a2a`,
+      url: `http://127.0.0.1:${String(port)}/a2a`,
       protocolBinding: "JSONRPC",
       protocolVersion: "1.0",
     },
@@ -78,9 +78,9 @@ const handler = createDurableA2A({
   conversation: () => conversation,
 });
 const server = createA2AServer(handler, { allowUnauthenticatedLoopback: true });
-server.listen(port, "127.0.0.1", () =>
-  console.log(`A2A demo: http://127.0.0.1:${port}`),
-);
+server.listen(port, "127.0.0.1", () => {
+  console.log(`A2A demo: http://127.0.0.1:${String(port)}`);
+});
 harness.resume();
 let closing = false;
 async function close() {
