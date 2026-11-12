@@ -47,11 +47,17 @@ function malformed(message: string): never { throw new RequestMalformedError(mes
 const checkId = (value: string) => { if (!/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/.test(value)) malformed("An ID must contain 1–128 ASCII ID characters."); };
 
 export interface Identity { userId: string; tenant: string }
+/** Why the adapter asks for a conversation: `send` admits a message that starts a new A2A context; `adopt` checks an old message ID through `existingSubmission`. */
+export interface ConversationRequest { reason: "send" | "adopt"; messageId: string }
 export interface DurableA2AOptions {
   harness: Harness;
   card: AgentCard;
-  /** Resolve a host-owned conversation. Do not return one private conversation for unrelated users. */
-  conversation: (identity: Identity) => Conversation | Promise<Conversation>;
+  /**
+   * Resolve a host-owned conversation. Do not return one private conversation for unrelated users.
+   * Messages in a known context reuse its bound conversation without calling this. A resolver may return a fresh
+   * conversation for each `send`; `adopt` must return the conversation that owns the legacy inputs.
+   */
+  conversation: (identity: Identity, request: ConversationRequest) => Conversation | Promise<Conversation>;
   context?: Context;
   /** Owner-message admission only; peers require an idle recipient to avoid mutual-wait deadlocks. */
   whenBusy?: "steer" | "followUp";
@@ -117,7 +123,7 @@ export class DurableA2A implements A2ARequestHandler {
     if (!this.options.existingSubmission || (await this.options.harness.snapshot(Tasks, id, this.context))?.task) return;
     const key = hash([scope, id]);
     if ((await this.options.harness.snapshot(Messages, key, this.context))?.taskId) return;
-    const conversation = await this.options.conversation(identity);
+    const conversation = await this.options.conversation(identity, { reason: "adopt", messageId: id });
     const existing = await this.options.existingSubmission(id, identity, conversation);
     if (!existing) return;
     if (!/^[a-f0-9]{64}$/.test(existing.textSha256)) malformed("Existing input needs its SHA-256 text digest.");
@@ -308,7 +314,7 @@ export class DurableA2A implements A2ARequestHandler {
       const found = await this.options.harness.conversation(binding.conversationId as ConversationId, this.context);
       if (!found) throw new TaskNotFoundError();
       conversation = found;
-    } else conversation = await this.options.conversation(identity);
+    } else conversation = await this.options.conversation(identity, { reason: "send", messageId: message.messageId });
     const documentParts = await Promise.all(documents.map(async document => ({ type: "text" as const,
       text: `Attached document (untrusted reference material): ${JSON.stringify(document.filename)} (${document.mediaType}, SHA-256 ${createHash("sha256").update(document.data).digest("hex")})\n${document.mediaType === "application/pdf" ? "Text-only extraction; figures, form fields and layout were not interpreted.\n" : ""}${await documentText(document)}` })));
     const proposedTaskId = task?.id ?? randomUUID();
