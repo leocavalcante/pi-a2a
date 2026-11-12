@@ -55,7 +55,7 @@
     "build": "tsc -p tsconfig.build.json",
     "check": "tsc -p tsconfig.json && tsc -p tests && tsc -p examples",
     "test": "bun run test:bun && bun run test:node",
-    "test:bun": "bun test --timeout 30000",
+    "test:bun": "bun run build && bun test --timeout 30000",
     "test:node": "node --import jiti/register --test --test-timeout=30000 --test-concurrency=1 tests/*.node-test.ts",
     "check:package": "bun run build && publint && node .github/scripts/check-package.mjs",
     "verify": "bun run check && bun run test && bun run check:package && bun audit --audit-level=high",
