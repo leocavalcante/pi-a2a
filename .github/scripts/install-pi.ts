@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -50,6 +51,17 @@ if (requested === "latest") {
 for (const [name] of Object.entries(manifest.devDependencies)) {
   if (name.startsWith("@earendil-works/"))
     manifest.devDependencies[name] = version;
+}
+// An older Pi can resolve dependencies it no longer works with. A repository
+// pins what each Pi release needs in .github/scripts/pi-pins.json, for example
+// { "1.0.4": { "@earendil-works/pi-codemode": "1.1.0" } }.
+const pinsFile = new URL("pi-pins.json", import.meta.url);
+if (existsSync(pinsFile)) {
+  const pins = JSON.parse(readFileSync(pinsFile, "utf8")) as Record<
+    string,
+    Record<string, string> | undefined
+  >;
+  Object.assign(manifest.devDependencies, pins[version] ?? {});
 }
 // Keep runtime dependencies pinned: test the Pi version consumers use with the
 // runtime dependencies this package ships.
