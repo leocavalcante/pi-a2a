@@ -31,7 +31,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run check
-      - run: bun run build
+      - run: bun run --if-present build
       - run: bunx --no-install publint
       - run: bun audit --audit-level=high
       - run: bash .github/scripts/check-workflows.sh
@@ -59,6 +59,9 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: bun install --frozen-lockfile
+      - name: Install test tools
+        if: hashFiles('.github/scripts/setup-test-tools.sh') != ''
+        run: bash .github/scripts/setup-test-tools.sh
       - run: bun run test
 
   node:
@@ -92,7 +95,10 @@ jobs:
         with:
           node-version: 22.19.0
           package-manager-cache: false
-      - run: bun .github/scripts/install-pi.ts 1.5.0
+      - run: bun .github/scripts/install-pi.ts min
+      - name: Install test tools
+        if: hashFiles('.github/scripts/setup-test-tools.sh') != ''
+        run: bash .github/scripts/setup-test-tools.sh
       - run: bun run check
       - run: bun run test
       - run: git diff --exit-code -- package.json bun.lock

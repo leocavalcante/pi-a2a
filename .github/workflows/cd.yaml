@@ -45,7 +45,7 @@ jobs:
           node-version: 24
           package-manager-cache: false
       - run: bun install --frozen-lockfile
-      - run: bun run build
+      - run: bun run --if-present build
       # The locally installed npm CLI supports OIDC; no registry token is used.
       - run: bunx --no-install semantic-release
         env:
