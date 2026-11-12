@@ -74,7 +74,7 @@ This standard applies to pi-a2a, pi-otel, pi-subagents, pi-tmux, and every new P
 **Required fields (MUST):**
 
 - `"version": "0.0.0-development"`. The release workflow sets the real version ([§8](#8-releases)).
-- `"type": "module"`, `"engines": { "node": ">=22.19.0" }`, and `"publishConfig": { "access": "public", "provenance": true }`.
+- `"type": "module"`, `"engines": { "node": ">=22.19.0", "pi": ">=<min>" }`, and `"publishConfig": { "access": "public", "provenance": true }`. `engines.pi` declares the minimum supported Pi, which the `pi-min` job reads; npm and Bun ignore it.
 - `repository.url` set to `git+https://github.com/leocavalcante/pi-<name>.git`, plus `bugs.url` and `"license": "MIT"`.
 - `files` as an allowlist:
   - `src/`
@@ -152,12 +152,13 @@ Workflows use the `.yaml` extension. `ci.yaml` runs on pull requests, whenever `
 | `static`    | Ubuntu                               | `bun run lint`, `bun run check`, `bun audit --audit-level=high`, publint, actionlint, zizmor, and gitleaks over the full history |
 | `test`      | Ubuntu, macOS, Windows               | `bun run test` (both lanes)                                                                                                      |
 | `node`      | Ubuntu × Node.js 22.19.0, 22, 24, 26 | `bun run test:node`                                                                                                              |
-| `pi-min`    | Ubuntu, Node.js 22.19.0              | Both lanes against the minimum supported Pi version                                                                              |
+| `pi-min`    | Ubuntu, Node.js 22.19.0              | Both lanes against the minimum supported Pi version from `engines.pi`                                                            |
 | `package`   | Ubuntu                               | Packs, inspects, installs, and imports the package under Node.js                                                                 |
 | `pi-canary` | Weekly and on demand                 | Both lanes against the latest Pi; opens or updates a `pi-compat` issue when they fail                                            |
 | `required`  | Always                               | Fails if any job above failed or was cancelled. It's the only required CI check.                                                 |
 
 - Repository-specific jobs go in the same file and in `required.needs`. Examples: tmux builds, Windows process supervision, older Pi pins.
+- Tests that need an external tool, such as tmux, install it in `.github/scripts/setup-test-tools.sh`. The `test` and `pi-min` jobs run that script when it exists, so the shared jobs stay identical.
 - `pr-title.yaml` checks that pull request titles are Conventional Commits, because each squash commit title becomes a release note. Titles are limited to 72 characters, except Dependabot's, which are longer but still conventional.
 - **Hygiene (MUST):**
   - Pin actions to full commit SHAs, with a version comment.
@@ -337,7 +338,7 @@ Never pin a version in an install command, because Pi never updates npm packages
 ## 14. Compatibility
 
 - **Node.js:** 22.19.0 or newer, the same floor as Pi. CI tests that exact version and every supported major version.
-- **Pi:** each README states the minimum version, which the `pi-min` job tests, and the tested version, which is the devDependency that Dependabot updates. Raising the minimum is a breaking change.
+- **Pi:** each README states the minimum version, which `engines.pi` declares and the `pi-min` job tests, and the tested version, which is the devDependency that Dependabot updates. Raising the minimum is a breaking change.
 - **Bun:** 1.4.x, for development only.
 - **Operating systems:** Linux, macOS, and Windows. Platform-specific features document what they skip.
 
@@ -500,7 +501,7 @@ export default defineConfig(
   },
   "peerDependencies": { "@earendil-works/pi-coding-agent": "*" },
   "devDependencies": { "<all exact>": "<x.y.z>" },
-  "engines": { "node": ">=22.19.0" },
+  "engines": { "node": ">=22.19.0", "pi": ">=<min>" },
   "packageManager": "bun@1.4.4",
   "publishConfig": { "access": "public", "provenance": true },
   "pi": {
@@ -594,12 +595,12 @@ jobs:
       }
     ],
     "@semantic-release/npm",
-    "@semantic-release/github"
+    ["@semantic-release/github", { "labels": ["release"] }]
   ]
 }
 ```
 
-Remove the `breaking` rule when the extension reaches 1.0. The devDependencies are `semantic-release`, `@semantic-release/commit-analyzer`, `@semantic-release/exec`, `@semantic-release/npm`, `@semantic-release/github`, `conventional-changelog-conventionalcommits`, and `git-cliff`, all with exact versions. `@semantic-release/npm` installs an npm CLI that supports trusted publishing; the release job runs it with lifecycle scripts disabled and builds explicitly beforehand.
+Remove the `breaking` rule when the extension reaches 1.0. When a release fails, the GitHub plugin opens an issue labeled `release`; with its default label, `semantic-release`, which doesn't exist, GitHub rejects that issue. The devDependencies are `semantic-release`, `@semantic-release/commit-analyzer`, `@semantic-release/exec`, `@semantic-release/npm`, `@semantic-release/github`, `conventional-changelog-conventionalcommits`, and `git-cliff`, all with exact versions. `@semantic-release/npm` installs an npm CLI that supports trusted publishing; the release job runs it with lifecycle scripts disabled and builds explicitly beforehand.
 
 `.github/scripts/verify-published.mjs` polls the registry for up to 15 minutes after publishing and fails the release if the version or its SLSA provenance doesn't appear. npm processes new versions before exposing them; pi-otel 0.1.4 took three minutes. pi-otel has the reference copy.
 
