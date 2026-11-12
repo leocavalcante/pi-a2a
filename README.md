@@ -74,10 +74,18 @@ Return at most four additional artifacts with unique IDs and URL parts using adv
 ## Install as a Pi extension
 
 ```sh
+pi install npm:@leocavalcante/pi-a2a
+```
+
+Then run `/reload` in Pi, or start a new session. Pi loads the TypeScript extension directly and supplies its own coding-agent and TypeBox packages. To try the extension once without adding it to your settings, run `pi -e npm:@leocavalcante/pi-a2a`.
+
+To follow unreleased changes, install from GitHub instead:
+
+```sh
 pi install git:github.com/leocavalcante/pi-a2a
 ```
 
-Pin a commit for reproducible use, for example `git:github.com/leocavalcante/pi-a2a@COMMIT`. Git installations load the TypeScript extension directly; building `dist` is not required. Pi supplies its own coding-agent and TypeBox packages.
+Git installations track `main` and report version `0.0.0-development`, so Pi doesn't show release notes for them. Remove either installation with `pi remove` and the same source.
 
 Create a **machine-local** `~/.pi/a2a/agents.json`:
 
