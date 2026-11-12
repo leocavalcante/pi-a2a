@@ -398,12 +398,27 @@ pi-tmux is the reference implementation; copy the shared files ([A.1](#a1-shared
 
 ### A.3 eslint.config.mjs
 
+The reference copy from pi-otel. Tests may relax only the `no-unsafe-*`, `no-explicit-any`, and `no-non-null-assertion` rules, because they inspect untyped payloads. TypeScript scripts in `.github/scripts` get their own `tsconfig.json`.
+
 ```js
 // @ts-check
 import eslint from "@eslint/js";
 import { defineConfig } from "eslint/config";
 import prettier from "eslint-config-prettier/flat";
+import globals from "globals";
 import tseslint from "typescript-eslint";
+
+// OTLP fixture tests inspect dynamically shaped JSON; keep these relaxations test-only.
+const testPayloadRules = Object.fromEntries(
+  Object.keys(tseslint.plugin.rules)
+    .filter(
+      (name) =>
+        name.startsWith("no-unsafe-") ||
+        name === "no-explicit-any" ||
+        name === "no-non-null-assertion",
+    )
+    .map((name) => [`@typescript-eslint/${name}`, "off"]),
+);
 
 export default defineConfig(
   { ignores: ["dist/", "coverage/"] },
@@ -438,6 +453,14 @@ export default defineConfig(
   {
     files: ["**/*.{js,mjs,cjs}"],
     extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    files: [".github/scripts/**/*.{js,mjs,cjs}"],
+    languageOptions: { globals: globals.node },
+  },
+  {
+    files: ["tests/**/*.ts"],
+    rules: testPayloadRules,
   },
   prettier,
 );

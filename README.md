@@ -130,12 +130,12 @@ The remote agent may invoke its own model when receiving a message. A normal fol
 
 ### Automatic replies in interactive Pi
 
-| Entry point | Default behavior |
-| --- | --- |
-| TUI `a2a_send` | Return admission with `watching: true` for an active task; deliver its eventual response in this history and start one assistant follow-up. |
-| TUI `/a2a send` | Return admission promptly; display the eventual remote response and an in-Pi notification, with **zero local model calls**. |
-| Explicit `a2a_send(wait: true)` | Wait in the tool and return the result inline, without an automatic duplicate. |
-| Print, JSON and RPC | Keep foreground waiting by default. Explicit `wait: false` returns a receipt with `watching: false`, not a background-delivery promise. |
+| Entry point                     | Default behavior                                                                                                                            |
+| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| TUI `a2a_send`                  | Return admission with `watching: true` for an active task; deliver its eventual response in this history and start one assistant follow-up. |
+| TUI `/a2a send`                 | Return admission promptly; display the eventual remote response and an in-Pi notification, with **zero local model calls**.                 |
+| Explicit `a2a_send(wait: true)` | Wait in the tool and return the result inline, without an automatic duplicate.                                                              |
+| Print, JSON and RPC             | Keep foreground waiting by default. Explicit `wait: false` returns a receipt with `watching: false`, not a background-delivery promise.     |
 
 A direct Message or an already settled Task returns inline without another completion notification. `watching` means a local observer was registered, not that the remote task succeeded or that delivery is guaranteed while Pi is closed. You do not need to keep asking Pi to check a watched task. Explicit task reads remain available and do not enroll arbitrary historical tasks.
 
@@ -178,14 +178,24 @@ The extension does not automatically copy the session transcript to a remote age
 Install from this repository and build it with `bun run build`. Import from `pi-a2a/client`:
 
 ```ts
-import { connectAgent, isTask, newMessageId, sendText, waitForTask } from "@leocavalcante/pi-a2a/client";
+import {
+  connectAgent,
+  isTask,
+  newMessageId,
+  sendText,
+  waitForTask,
+} from "@leocavalcante/pi-a2a/client";
 
 const client = await connectAgent("https://agent.example.com", {
   headers: () => ({ Authorization: `Bearer ${process.env.REMOTE_A2A_TOKEN}` }),
 });
 const messageId = newMessageId(); // Retain this BEFORE sending.
-const response = await sendText(client, "An explicitly authorized request", { messageId });
-const result = isTask(response) ? await waitForTask(client, response.id) : response;
+const response = await sendText(client, "An explicitly authorized request", {
+  messageId,
+});
+const result = isTask(response)
+  ? await waitForTask(client, response.id)
+  : response;
 ```
 
 `connectAgent` returns the native official-SDK `Client`, so its structured messages, task methods and streams remain available. Credentials come from a host callback; no credential store or provider login is copied. Agent Cards cannot redirect authenticated requests to a new origin: configure `allowedOrigins` explicitly when a legitimate card advertises additional endpoints. HTTP redirects are rejected. HTTPS is the default; plaintext loopback is an explicit local/development exception. Complete JSON responses are capped at 2 MiB; the SDK bounds individual streaming events.
@@ -203,25 +213,39 @@ const card = AgentCard.fromJSON({
   name: "My agent",
   description: "Application-owned capabilities",
   version: "1.0.0",
-  supportedInterfaces: [{
-    url: "https://agent.example.com/a2a",
-    protocolBinding: "JSONRPC", protocolVersion: "1.0"
-  }],
+  supportedInterfaces: [
+    {
+      url: "https://agent.example.com/a2a",
+      protocolBinding: "JSONRPC",
+      protocolVersion: "1.0",
+    },
+  ],
   capabilities: { streaming: true },
-  defaultInputModes: ["text/plain"], defaultOutputModes: ["text/plain"],
+  defaultInputModes: ["text/plain"],
+  defaultOutputModes: ["text/plain"],
   securitySchemes: {
-    bearer: { httpAuthSecurityScheme: { scheme: "bearer", bearerFormat: "opaque" } }
+    bearer: {
+      httpAuthSecurityScheme: { scheme: "bearer", bearerFormat: "opaque" },
+    },
   },
   securityRequirements: [{ schemes: { bearer: { list: [] } } }],
-  skills: [{ id: "assist", name: "Assist", description: "Handle authorized requests", tags: ["assistant"] }]
+  skills: [
+    {
+      id: "assist",
+      name: "Assist",
+      description: "Handle authorized requests",
+      tags: ["assistant"],
+    },
+  ],
 });
 const adapter = createDurableA2A({
   harness,
   card,
-  conversation: identity => conversationsFor(identity.userId, identity.tenant)
+  conversation: (identity) =>
+    conversationsFor(identity.userId, identity.tenant),
 });
 const a2a = a2aHttpHandler(adapter, {
-  authenticate: bearerAuth(() => process.env.A2A_SERVER_TOKEN, "owner")
+  authenticate: bearerAuth(() => process.env.A2A_SERVER_TOKEN, "owner"),
 });
 // Mount in the EXISTING owner's HTTP(S) server:
 // if (await a2a(request, response)) return;

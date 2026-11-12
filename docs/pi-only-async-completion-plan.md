@@ -109,20 +109,20 @@ this plan was written. Do not upgrade them to implement this feature.
 
 ### Relevant code at the recorded baseline
 
-| Path | Current responsibility / observation |
-| --- | --- |
-| `src/extension.ts` | Registers four A2A tools and `/a2a`; writes `pi-a2a.receipt` entries before networking and after admission. |
-| `src/extension.ts`, `send()` | Always submits asynchronously at the protocol level, but optionally calls `waitForTask()` before returning. |
-| `src/extension.ts`, `a2a_send` | Omitted `wait` currently means `true`. |
-| `src/extension.ts`, `/a2a send` | Currently waits for completion and deliberately does not invoke a local Pi model. |
-| `src/client.ts`, `waitForTask()` | Foreground `GetTask` loop, default interval 500 ms; not a background notification manager. |
-| `src/client.ts`, `connectAgent()` | Native official-SDK client, origin/redirect protections, credential callbacks, bounded JSON responses, 330,000 ms default request timeout. |
-| `src/config.ts` | Explicit machine-local targets and credential references. Reuse it unchanged unless a directly required defect is demonstrated. |
-| `src/durable.ts` | Server supports status/artifact streams and subscriptions; webhook push is explicitly unsupported. No production change is required here. |
-| `tests/extension.test.ts` | Tool/schema tests, real Pi SDK session tests, and the command's no-local-model contract. |
-| `tests/fixtures/agent.ts` | Model-free Durable peer with streaming and a faux provider. |
-| `tests/http.test.ts`, `tests/rest.test.ts` | Official-SDK interoperability, transport, authentication, origin, and output-boundary tests. |
-| `tests/recovery.test.ts` | Existing remote-task durability and no-fabricated-final-answer coverage. |
+| Path                                       | Current responsibility / observation                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/extension.ts`                         | Registers four A2A tools and `/a2a`; writes `pi-a2a.receipt` entries before networking and after admission.                                |
+| `src/extension.ts`, `send()`               | Always submits asynchronously at the protocol level, but optionally calls `waitForTask()` before returning.                                |
+| `src/extension.ts`, `a2a_send`             | Omitted `wait` currently means `true`.                                                                                                     |
+| `src/extension.ts`, `/a2a send`            | Currently waits for completion and deliberately does not invoke a local Pi model.                                                          |
+| `src/client.ts`, `waitForTask()`           | Foreground `GetTask` loop, default interval 500 ms; not a background notification manager.                                                 |
+| `src/client.ts`, `connectAgent()`          | Native official-SDK client, origin/redirect protections, credential callbacks, bounded JSON responses, 330,000 ms default request timeout. |
+| `src/config.ts`                            | Explicit machine-local targets and credential references. Reuse it unchanged unless a directly required defect is demonstrated.            |
+| `src/durable.ts`                           | Server supports status/artifact streams and subscriptions; webhook push is explicitly unsupported. No production change is required here.  |
+| `tests/extension.test.ts`                  | Tool/schema tests, real Pi SDK session tests, and the command's no-local-model contract.                                                   |
+| `tests/fixtures/agent.ts`                  | Model-free Durable peer with streaming and a faux provider.                                                                                |
+| `tests/http.test.ts`, `tests/rest.test.ts` | Official-SDK interoperability, transport, authentication, origin, and output-boundary tests.                                               |
+| `tests/recovery.test.ts`                   | Existing remote-task durability and no-fabricated-final-answer coverage.                                                                   |
 
 During the preceding research, a configured live agent advertised
 `streaming: true` and `pushNotifications: false`. Treat that as evidence of a
@@ -168,14 +168,14 @@ it.
 
 Use the existing `wait` parameter. Do not add a second background/watch option.
 
-| Entry point | Required behavior |
-| --- | --- |
-| TUI `a2a_send`, omitted `wait` or `wait: false` | Return an admission receipt promptly; observe a nonterminal task automatically; trigger one assistant follow-up when its result is delivered. |
-| `a2a_send`, explicit `wait: true` | Preserve foreground waiting. Return the final/interrupted result inline; do not publish a duplicate automatic completion. |
-| TUI `/a2a send AGENT MESSAGE` | Return an admission receipt promptly; display the eventual remote result and an in-Pi notification, but never invoke a local Pi model. Preserve the existing command's model-free contract. |
-| Print, JSON, and RPC modes | Preserve existing defaults and foreground behavior. Explicit `wait: false` returns a receipt without a persistent background-delivery promise. Do not extend those mode lifecycles in this MVP. |
-| `a2a_get_task`, `/a2a result` | Remain reads. Do not create another watcher, resubmit work, or enroll arbitrary historical tasks. A deliberate inspection may return a result already notified automatically. |
-| Explicit cancellation | Preserve the existing tool/command. A watcher may observe the resulting canceled state, but never issues cancellation itself. |
+| Entry point                                     | Required behavior                                                                                                                                                                               |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TUI `a2a_send`, omitted `wait` or `wait: false` | Return an admission receipt promptly; observe a nonterminal task automatically; trigger one assistant follow-up when its result is delivered.                                                   |
+| `a2a_send`, explicit `wait: true`               | Preserve foreground waiting. Return the final/interrupted result inline; do not publish a duplicate automatic completion.                                                                       |
+| TUI `/a2a send AGENT MESSAGE`                   | Return an admission receipt promptly; display the eventual remote result and an in-Pi notification, but never invoke a local Pi model. Preserve the existing command's model-free contract.     |
+| Print, JSON, and RPC modes                      | Preserve existing defaults and foreground behavior. Explicit `wait: false` returns a receipt without a persistent background-delivery promise. Do not extend those mode lifecycles in this MVP. |
+| `a2a_get_task`, `/a2a result`                   | Remain reads. Do not create another watcher, resubmit work, or enroll arbitrary historical tasks. A deliberate inspection may return a result already notified automatically.                   |
+| Explicit cancellation                           | Preserve the existing tool/command. A watcher may observe the resulting canceled state, but never issues cancellation itself.                                                                   |
 
 If the initial send returns a direct `Message`, or an already settled `Task`,
 return its answer inline. Do not also enqueue a completion notification.
@@ -508,28 +508,28 @@ All checks must be model-free, with synthetic local data and the existing faux
 provider or an official-SDK scripted peer. Use deferred gates/events and fake
 clocks, not real network services, fixed long sleeps, or paid model calls.
 
-| Area | Required evidence |
-| --- | --- |
-| Admission | TUI default returns while remote task is still gated/working; intent is present before any network I/O and admission is retained before observing. |
-| Happy path | End the original local turn, release the remote task, and receive the answer automatically without another user prompt or task-read tool call. Exactly one automatic completion entry in that active history. |
-| Real Pi integration | Exercise the extension through a real SDK session, not just a mock `sendMessage`. Bind it explicitly with `session.bindExtensions({ mode: "tui" })` or the equivalent public binding; SDK sessions default to print mode. Observe the automatic assistant response using events, not a second `session.prompt()`. |
-| Model use | Observation/reconnects make no local model calls. Tool-origin completion causes the expected follow-up only. `/a2a send` remains at zero local model calls through eventual completion. |
-| Inline results | Direct `Message`, already settled task, and explicit `wait: true` return inline without later automatic duplicates. |
-| Modes | Print/JSON/RPC defaults remain unchanged; explicit non-TUI `wait: false` does not make a false background-delivery promise. |
-| Busy Pi | Completion during another local run is retained and delivered afterward without steering it, invalid tool/result message ordering, or duplicate model turns. |
-| Correlation | Ignore/reject mismatched task/context stream events; do not publish a different task's answer. |
-| Races | Task completes between `GetTask` and subscription; completion occurs before first subscription; stream closes before its final event. All recover through `GetTask` without resending. |
-| Reconnects | Transient disconnect, existing transport timeout, and multiple reconnects preserve task/message IDs. Repeated snapshot-plus-EOF does not busy-loop and eventually pauses with one local warning. |
-| Unsupported/error paths | Streaming disabled/unsupported, missing credentials, changed origin, and exhausted retries preserve admission, sanitize diagnostics, and never masquerade as remote failure or invoke another transport/host. |
-| Significant states | Completion, failure, cancellation, rejection, input-required, and auth-required each produce the correct non-fabricated outcome. New input with a new message ID rearms an interrupted task. |
-| Duplicate events | Repeated artifacts, status updates, reconnect snapshots, and repeated registration cannot queue/deliver the same completion twice in one active history. |
-| Simultaneous tasks | Two tasks completing together deliver their own answers, without overwriting correlation or starting conflicting drain operations. |
-| Persistence windows | Reopen after admission, after persisting ready but before injection, while injection is queued/not persisted, and after custom-message persistence but before bookkeeping acknowledgement. No lost ready event and no duplicate persisted completion. |
-| Session lifecycle | Reload/resume restores eligible work. Switch, shutdown, tree navigation before/after admission, and fork prevent stale callbacks from writing into another session/history. Ordinary new messages do not stop observation. |
-| Branch semantics | Abandoned/legacy receipts do not enroll; alternate-history behavior matches the documented branch-local contract; compaction leaves recoverable records. |
-| Bounds/security | Unicode and JSON-escaped oversized text remain bounded, truncation is explicit, no non-text artifacts are fetched, no raw credential-bearing exceptions appear, and existing redirect/origin checks still apply to subscriptions/reconnects. |
-| Cleanup | Streams and timers end on shutdown/pause/settlement; local shutdown never sends `CancelTask`; cleanup does not leave hanging tests or unhandled rejections. |
-| Packaging | New internal runtime imports are included in the package and load correctly without importing Pi into the generic client entry point. |
+| Area                    | Required evidence                                                                                                                                                                                                                                                                                                 |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Admission               | TUI default returns while remote task is still gated/working; intent is present before any network I/O and admission is retained before observing.                                                                                                                                                                |
+| Happy path              | End the original local turn, release the remote task, and receive the answer automatically without another user prompt or task-read tool call. Exactly one automatic completion entry in that active history.                                                                                                     |
+| Real Pi integration     | Exercise the extension through a real SDK session, not just a mock `sendMessage`. Bind it explicitly with `session.bindExtensions({ mode: "tui" })` or the equivalent public binding; SDK sessions default to print mode. Observe the automatic assistant response using events, not a second `session.prompt()`. |
+| Model use               | Observation/reconnects make no local model calls. Tool-origin completion causes the expected follow-up only. `/a2a send` remains at zero local model calls through eventual completion.                                                                                                                           |
+| Inline results          | Direct `Message`, already settled task, and explicit `wait: true` return inline without later automatic duplicates.                                                                                                                                                                                               |
+| Modes                   | Print/JSON/RPC defaults remain unchanged; explicit non-TUI `wait: false` does not make a false background-delivery promise.                                                                                                                                                                                       |
+| Busy Pi                 | Completion during another local run is retained and delivered afterward without steering it, invalid tool/result message ordering, or duplicate model turns.                                                                                                                                                      |
+| Correlation             | Ignore/reject mismatched task/context stream events; do not publish a different task's answer.                                                                                                                                                                                                                    |
+| Races                   | Task completes between `GetTask` and subscription; completion occurs before first subscription; stream closes before its final event. All recover through `GetTask` without resending.                                                                                                                            |
+| Reconnects              | Transient disconnect, existing transport timeout, and multiple reconnects preserve task/message IDs. Repeated snapshot-plus-EOF does not busy-loop and eventually pauses with one local warning.                                                                                                                  |
+| Unsupported/error paths | Streaming disabled/unsupported, missing credentials, changed origin, and exhausted retries preserve admission, sanitize diagnostics, and never masquerade as remote failure or invoke another transport/host.                                                                                                     |
+| Significant states      | Completion, failure, cancellation, rejection, input-required, and auth-required each produce the correct non-fabricated outcome. New input with a new message ID rearms an interrupted task.                                                                                                                      |
+| Duplicate events        | Repeated artifacts, status updates, reconnect snapshots, and repeated registration cannot queue/deliver the same completion twice in one active history.                                                                                                                                                          |
+| Simultaneous tasks      | Two tasks completing together deliver their own answers, without overwriting correlation or starting conflicting drain operations.                                                                                                                                                                                |
+| Persistence windows     | Reopen after admission, after persisting ready but before injection, while injection is queued/not persisted, and after custom-message persistence but before bookkeeping acknowledgement. No lost ready event and no duplicate persisted completion.                                                             |
+| Session lifecycle       | Reload/resume restores eligible work. Switch, shutdown, tree navigation before/after admission, and fork prevent stale callbacks from writing into another session/history. Ordinary new messages do not stop observation.                                                                                        |
+| Branch semantics        | Abandoned/legacy receipts do not enroll; alternate-history behavior matches the documented branch-local contract; compaction leaves recoverable records.                                                                                                                                                          |
+| Bounds/security         | Unicode and JSON-escaped oversized text remain bounded, truncation is explicit, no non-text artifacts are fetched, no raw credential-bearing exceptions appear, and existing redirect/origin checks still apply to subscriptions/reconnects.                                                                      |
+| Cleanup                 | Streams and timers end on shutdown/pause/settlement; local shutdown never sends `CancelTask`; cleanup does not leave hanging tests or unhandled rejections.                                                                                                                                                       |
+| Packaging               | New internal runtime imports are included in the package and load correctly without importing Pi into the generic client entry point.                                                                                                                                                                             |
 
 For persistence tests, use a task peer whose identity survives the local Pi
 session reopen. Reopening only the remote Durable database does not establish

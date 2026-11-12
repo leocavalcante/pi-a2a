@@ -23,7 +23,18 @@ test("the extension loads on Node.js and registers its tools, command, and hooks
   // messages, append entries, or read configuration.
   extension(pi as unknown as ExtensionAPI);
 
-  assert.deepEqual(tools, ["a2a_agents", "a2a_send", "a2a_get_task", "a2a_cancel_task"]);
+  assert.deepEqual(tools, [
+    "a2a_agents",
+    "a2a_send",
+    "a2a_get_task",
+    "a2a_cancel_task",
+  ]);
   assert.deepEqual(commands, ["a2a"]);
-  assert.deepEqual(events.sort(), ["agent_settled", "message_end", "session_shutdown", "session_start", "session_tree"]);
+  assert.deepEqual(events.sort(), [
+    "agent_settled",
+    "message_end",
+    "session_shutdown",
+    "session_start",
+    "session_tree",
+  ]);
 });

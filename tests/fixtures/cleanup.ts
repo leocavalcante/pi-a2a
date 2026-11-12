@@ -20,7 +20,7 @@ export function deferred(t: TestContext): (step: () => unknown) => void {
     }
     if (failure !== undefined) throw failure;
   });
-  return step => {
+  return (step) => {
     steps.push(step);
   };
 }
