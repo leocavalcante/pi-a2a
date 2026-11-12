@@ -25,6 +25,7 @@ try {
     "dist/server.js",
     "dist/server.d.ts",
     "examples/echo.ts",
+    "CHANGELOG.md",
     "README.md",
     "LICENSE",
   ]) {
