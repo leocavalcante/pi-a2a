@@ -13,7 +13,7 @@ MIT licensed. Built on the [official A2A JS SDK](https://github.com/a2aproject/a
 
 ## Compatibility and scope
 
-Node **22.19+**, Pi coding agent / Pi Durable **1.5.0**, official `@a2a-js/sdk` **1.3.0**, A2A protocol **1.0**. Durable is experimental; this is a version-pinned integration, not a promise of compatibility with every Pi release.
+Node **22.19+**, Pi coding agent / Pi Durable **1.5.0 or newer** (tested with 1.5.2), official `@a2a-js/sdk` **1.3.0**, A2A protocol **1.0**. Durable is experimental: CI tests Pi 1.5.0 and 1.5.2 and checks the latest Pi release every week, but a new Durable release can still change the APIs pi-a2a uses.
 
 The server exposes **JSON-RPC over HTTP**, Agent Card discovery, send/get/list tasks, cursor pagination, follow-ups, status/artifact streaming and subscription. The client negotiates **JSON-RPC or HTTP+JSON/REST** through the official SDK. It can talk to non-Pi implementations using those interfaces. gRPC and v0.3 compatibility are not enabled here. Authentication, supported media and capabilities still have to match.
 
