@@ -34,7 +34,7 @@ uvx --from zizmor==1.32.0 zizmor --offline .github
 
 ## Pi Durable compatibility
 
-The optional peers `@earendil-works/chord` and `@earendil-works/pi-durable` are pinned to exactly `1.5.0`. Chord 1.5.2 moved exports such as `JsonValue` and `Context` to subpaths, so a range would admit versions that break the Durable adapter. Supporting newer Durable releases is feature work; the weekly Pi canary reports when the latest release diverges.
+The optional peers `@earendil-works/chord` and `@earendil-works/pi-durable` accept any version, like the other Pi host packages. Chord 1.5.2 removed `Context` and `JsonValue` from its root export, so import Chord types from the `@earendil-works/chord/context` and `@earendil-works/chord/delta` subpaths, which both 1.5.0 and 1.5.2 provide. CI tests the minimum Pi (1.5.0) and the devDependency version; the weekly Pi canary reports when the latest release diverges.
 
 ## Commits and pull requests
 

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
-import type { Context, JsonValue } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import {
+  BACKGROUND_CONTEXT,
+  type Context,
+} from "@earendil-works/chord/context";
+import type { JsonValue } from "@earendil-works/chord/delta";
 import {
   AssistantEntry,
   defineDocFamily,
