@@ -10,6 +10,7 @@ import { isTask, waitForTask } from "../src/client.ts";
 import { documentText, validateDocument, MAX_DOCUMENT_BYTES } from "../src/documents.ts";
 import { fixture } from "./fixtures/agent.ts";
 import { syntheticPdf } from "./fixtures/pdf.ts";
+import { deferred } from "./fixtures/cleanup.ts";
 const pdf = syntheticPdf();
 const request = (data = pdf, filename = "proof.pdf", mediaType = "application/pdf") => SendMessageRequest.fromJSON({
   message: { messageId: "retained-document", role: "ROLE_USER", parts: [{ raw: data.toString("base64"), mediaType, filename }] },
@@ -22,9 +23,10 @@ test("PDF is opt-in; text/image defaults do not admit a document", async t => {
   assert.equal(f.faux.state.callCount, 0);
 });
 test("real PDF text reaches the model, history stays bounded, and immutable dedup survives reopen", async t => {
-  const directory = await mkdtemp(join(tmpdir(), "a2a-documents-")); t.after(() => rm(directory, { recursive: true }));
+  const defer = deferred(t);
+  const directory = await mkdtemp(join(tmpdir(), "a2a-documents-")); defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const database = join(directory, "agent.sqlite");
-  const f = await fixture({ storage: await openNodeSqliteStorage(database), documents: true }); t.after(f.close);
+  const f = await fixture({ storage: await openNodeSqliteStorage(database), documents: true }); defer(f.close);
   let observed = false;
   f.faux.setResponses([context => {
     const user = context.messages.findLast(message => message.role === "user");
@@ -43,7 +45,7 @@ test("real PDF text reaches the model, history stays bounded, and immutable dedu
   await assert.rejects(f.client.sendMessage(request(pdf, "renamed.pdf")), /message ID already belongs/);
   await assert.rejects(f.client.sendMessage(SendMessageRequest.fromJSON({ message: { messageId: "retained-document", role: "ROLE_USER", parts: [{ text: "Removed the document" }] } })), /message ID already belongs/);
   await f.close();
-  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), documents: true, answers: [] }); t.after(reopened.close);
+  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), documents: true, answers: [] }); defer(reopened.close);
   const same = await reopened.client.sendMessage(request()); assert.ok(isTask(same)); assert.equal(same.id, admitted.id);
   assert.equal(reopened.faux.state.callCount, 0);
 });

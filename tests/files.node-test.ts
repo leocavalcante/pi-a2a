@@ -8,16 +8,18 @@ import { ServerCallContext } from "@a2a-js/sdk/server";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { isTask, sendText, waitForTask } from "../src/client.ts";
 import { fixture } from "./fixtures/agent.ts";
+import { deferred } from "./fixtures/cleanup.ts";
 
 const sha = "1".repeat(64);
 const file = (origin: string, id: string) => Artifact.fromJSON({ artifactId: `media-${sha}`, name: "image.png",
   parts: [{ url: `${origin}/media/tasks/${id}/${sha}`, filename: "image.png", mediaType: "image/png", metadata: { sha256: sha, bytes: 12 } }] });
 
 test("host URL artifacts enrich retained completed tasks without rerunning or changing the committed answer", async t => {
-  const directory = await mkdtemp(join(tmpdir(), "a2a-files-")); t.after(() => rm(directory, { recursive: true }));
+  const defer = deferred(t);
+  const directory = await mkdtemp(join(tmpdir(), "a2a-files-")); defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const database = join(directory, "agent.sqlite");
   let origin = "", visible = false;
-  const f = await fixture({ storage: await openNodeSqliteStorage(database), fileArtifacts: async task => visible ? [file(origin, task.id)] : [] }); t.after(f.close);
+  const f = await fixture({ storage: await openNodeSqliteStorage(database), fileArtifacts: async task => visible ? [file(origin, task.id)] : [] }); defer(f.close);
   origin = f.baseUrl;
   const accepted = await sendText(f.client, "Synthetic retained output", { messageId: "existing-output" }); assert.ok(isTask(accepted));
   const admitted = await waitForTask(f.client, accepted.id, { intervalMs: 10 });
@@ -29,7 +31,7 @@ test("host URL artifacts enrich retained completed tasks without rerunning or ch
   assert.deepEqual(enriched.artifacts[0], admitted.artifacts[0]); assert.equal(f.faux.state.callCount, 1);
   assert.equal(enriched.artifacts[1].parts[0].content?.$case, "url");
   await f.close();
-  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), answers: [], fileArtifacts: async task => [file(origin, task.id)] }); t.after(reopened.close);
+  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), answers: [], fileArtifacts: async task => [file(origin, task.id)] }); defer(reopened.close);
   origin = reopened.baseUrl;
   const retained = await reopened.client.getTask({ id: admitted.id, tenant: "", historyLength: 0 });
   assert.equal(retained.artifacts.length, 2); assert.equal(retained.status?.timestamp, stamp); assert.equal(reopened.faux.state.callCount, 0);

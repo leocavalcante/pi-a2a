@@ -12,6 +12,7 @@ import { ServerCallContext } from "@a2a-js/sdk/server";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { isTask, sendText } from "../src/client.ts";
 import { context, fixture } from "./fixtures/agent.ts";
+import { deferred } from "./fixtures/cleanup.ts";
 const token = "synthetic-callback-credential-12345678";
 async function callback() {
   const calls: { body: string; auth?: string; type?: string }[] = [], events = new EventEmitter();
@@ -55,8 +56,9 @@ test("A2A push is delivered without a task reader or SSE observer, then deduplic
 });
 
 test("callback guard withholds both new payloads and exact saved retries across reopen", async t => {
-  const receiver = await callback(); t.after(receiver.close); receiver.code(503);
-  const directory = await mkdtemp(join(tmpdir(), "a2a-push-guard-")); t.after(() => rm(directory, { recursive: true }));
+  const defer = deferred(t);
+  const receiver = await callback(); defer(receiver.close); receiver.code(503);
+  const directory = await mkdtemp(join(tmpdir(), "a2a-push-guard-")); defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const database = join(directory, "agent.sqlite");
   let withheld = true, checks = 0;
   const push = { allowedOrigins: [receiver.origin], allowHttpLoopback: true, validatePayload: (value: unknown) => {
@@ -64,7 +66,7 @@ test("callback guard withholds both new payloads and exact saved retries across 
     assert.match(JSON.stringify(value), /Hello over A2A/);
     if (withheld) throw new Error("Synthetic sensitive payload withheld.");
   } };
-  const f = await fixture({ storage: await openNodeSqliteStorage(database), push }); t.after(f.close);
+  const f = await fixture({ storage: await openNodeSqliteStorage(database), push }); defer(f.close);
   const task = await sendText(f.client, "Synthetic guarded notification", { messageId: "guarded-push" }); assert.ok(isTask(task));
   await f.adapter.createTaskPushNotificationConfig(config(`${receiver.origin}/push`, task.id), owner);
   await f.root.waitForIdle(context);
@@ -72,7 +74,7 @@ test("callback guard withholds both new payloads and exact saved retries across 
   withheld = false;
   await f.adapter.flushPush(); assert.equal(receiver.calls.length, 1);
   await f.close(); await delay(1050);
-  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), push, answers: [] }); t.after(reopened.close);
+  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), push, answers: [] }); defer(reopened.close);
   withheld = true;
   await reopened.adapter.flushPush(); assert.equal(receiver.calls.length, 1);
   withheld = false; receiver.code(202);
@@ -105,16 +107,17 @@ test("push configurations are scoped, paginated and removable", async t => {
 });
 
 test("unacknowledged push survives SQLite reopen and reuses the exact event body", async t => {
-  const receiver = await callback(); t.after(receiver.close); receiver.code(503);
-  const directory = await mkdtemp(join(tmpdir(), "a2a-push-reopen-")); t.after(() => rm(directory, { recursive: true }));
+  const defer = deferred(t);
+  const receiver = await callback(); defer(receiver.close); receiver.code(503);
+  const directory = await mkdtemp(join(tmpdir(), "a2a-push-reopen-")); defer(() => rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const database = join(directory, "agent.sqlite"), push = { allowedOrigins: [receiver.origin], allowHttpLoopback: true };
-  const f = await fixture({ storage: await openNodeSqliteStorage(database), push }); t.after(f.close);
+  const f = await fixture({ storage: await openNodeSqliteStorage(database), push }); defer(f.close);
   const task = await sendText(f.client, "Synthetic retained notification", { messageId: "persist-push" }); assert.ok(isTask(task));
   await f.adapter.createTaskPushNotificationConfig(config(`${receiver.origin}/push`, task.id), owner);
   await f.root.waitForIdle(context); await f.adapter.flushPush();
   assert.equal(receiver.calls.length, 1);
   await f.close(); await delay(1050); receiver.code(202);
-  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), push, answers: [] }); t.after(reopened.close);
+  const reopened = await fixture({ storage: await openNodeSqliteStorage(database), push, answers: [] }); defer(reopened.close);
   await reopened.adapter.flushPush(); await reopened.adapter.flushPush();
   assert.equal(receiver.calls.length, 2);
   assert.equal(receiver.calls[0].body, receiver.calls[1].body);

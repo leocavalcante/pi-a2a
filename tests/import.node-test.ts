@@ -7,6 +7,7 @@ import test from "node:test";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { isTask, sendText, textOf, TaskState } from "../src/client.ts";
 import { context, fixture } from "./fixtures/agent.ts";
+import { deferred } from "./fixtures/cleanup.ts";
 const digest = (text: string) => createHash("sha256").update(text).digest("hex");
 
 test("an existing submission becomes an A2A task without submitting or running it again", async t => {
@@ -24,9 +25,10 @@ test("an existing submission becomes an A2A task without submitting or running i
 });
 
 test("first contact may be an identical legacy message replay; imported bindings survive SQLite reopen", async t => {
-  const dir = await mkdtemp(join(tmpdir(), "a2a-import-")); t.after(() => rm(dir, { recursive: true }));
+  const defer = deferred(t);
+  const dir = await mkdtemp(join(tmpdir(), "a2a-import-")); defer(() => rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }));
   const db = join(dir, "session.sqlite");
-  const f = await fixture({ storage: await openNodeSqliteStorage(db), answers: ["Old result"] }); t.after(f.close);
+  const f = await fixture({ storage: await openNodeSqliteStorage(db), answers: ["Old result"] }); defer(f.close);
   const original = await f.root.submit({ type: "input", content: "Literal R$800\n$(untouched)", requestId: "old-message" }, context);
   await original.wait(context);
   f.adapter.options.existingSubmission = async id => id === "old-message" ? { submissionId: original.id, textSha256: digest("Literal R$800\n$(untouched)") } : undefined;
