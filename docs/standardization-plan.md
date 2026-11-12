@@ -10,6 +10,7 @@ Status: in progress, 2026-11-12. Target: [Pi extension standard v1](pi-extension
   - **Step 3 is dropped.** `@earendil-works/chord` 1.5.2 moved exports such as `JsonValue` and `Context` to subpaths, so the exact `1.5.0` pins on chord and Pi Durable are required. Widening them to `^1.5.0` would break users. Supporting chord 1.5.2 or newer is separate feature work. The weekly Pi canary will report it.
   - The `HeadersInit` type came only from the DOM library that TypeScript added by default. `src/client.ts` now derives the same type from Node's global `Headers`.
   - The tests use the `node:test` API with `t.after()`. Bun runs them through its `node:test` support, so they type-check against Node types only. Converting them to `bun:test` is follow-up work.
+  - The Durable tests that reopen SQLite through Pi Durable's `node:sqlite` storage fail on macOS under Bun's emulation, with "disk I/O error". In production that code runs on Node.js, so seven files (38 tests) moved to the Node.js lane.
 - The first automated release now comes from step 7, a `docs(readme)` patch (0.4.1). Configure the trusted publisher right before merging step 2, then merge step 7 within 2 days, or the trusted publisher expires.
 
 pi-a2a is the second repository, after the pilot. Like pi-otel, it has no CI to migrate, but its npm release has no matching tag, and that has to be fixed first.

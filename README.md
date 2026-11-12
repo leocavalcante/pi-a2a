@@ -281,7 +281,7 @@ bun run verify
 git diff --check
 ```
 
-`verify` type-checks the source, tests, and examples; runs the Bun test suite and the Node.js lane (the extension load test and SIGKILL recovery, which depend on Node.js behavior); builds the package and installs it into an isolated consumer; and audits dependencies. Development uses Bun 1.4.4 and TypeScript 6.0.3. Pi and SDK users run the package on Node.js.
+`verify` type-checks the source, tests, and examples; runs the Bun test suite and the Node.js lane (the extension load test, SIGKILL recovery, and the Durable tests that use Node's built-in SQLite); builds the package and installs it into an isolated consumer; and audits dependencies. Development uses Bun 1.4.4 and TypeScript 6.0.3. Pi and SDK users run the package on Node.js.
 
 Tests use synthetic messages, isolated stores and faux providers. They exercise the official client against Durable, a non-Pi official-SDK peer, real TUI-bound SDK sessions with delayed HTTP/SSE replies, model-free command completion, busy-session ordering, disk-backed client reopen and lost-injection recovery, branch-local deduplication, bounded reconnects, request conflicts, SQLite reopen/recovery, interrupted waiting, scoped cancellation, task pagination and ownership, protocol errors, output limits and credential-origin boundaries. Passing these tests is not official A2A certification or evidence of live OAuth, every third-party deployment, paid model quality or production HA.
 
