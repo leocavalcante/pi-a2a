@@ -1,0 +1,4 @@
+# Formatting-only commits. GitHub and `git blame --ignore-revs-file` skip them.
+
+# style: format with Prettier (#7)
+1803f92490e84fa80f367bc90576e8fea77d5f62
