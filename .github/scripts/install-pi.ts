@@ -23,10 +23,13 @@ const manifest = JSON.parse(
 // so the shared CI workflow needs no repository-specific version.
 let requested = process.argv[2];
 if (requested === "min") {
-  requested = /^>=\s*(\d+\.\d+\.\d+)$/.exec(manifest.engines?.pi ?? "")?.[1];
-  if (!requested) {
+  const minimum = /^>=\s*(\d+\.\d+\.\d+)$/.exec(
+    manifest.engines?.pi ?? "",
+  )?.[1];
+  if (!minimum) {
     throw new Error('Declare the minimum Pi as engines.pi ">=x.y.z".');
   }
+  requested = minimum;
 }
 if (!requested || !/^(?:latest|\d+\.\d+\.\d+)$/.test(requested)) {
   throw new Error("Expected min, latest, or a stable Pi version.");
