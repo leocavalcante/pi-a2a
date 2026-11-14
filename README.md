@@ -15,6 +15,7 @@ Delegate an authorized request to a configured agent from Pi and inspect its tas
 - [Compatibility](#compatibility)
 - [Privacy and security](#privacy-and-security)
 - [Troubleshooting](#troubleshooting)
+- [More Pi extensions](#more-pi-extensions)
 - [Contributing](#contributing)
 - [License](#license)
 
@@ -350,6 +351,19 @@ To report a vulnerability privately, use [SECURITY.md](https://github.com/leocav
 - **A send is uncertain.** Inspect its original `messageId` or `taskId` with `a2a_get_task` or `/a2a result`. Do not send it again with a new ID.
 - **Observation pauses.** Remote work may continue. Read the retained task or reopen the eligible Pi history to retry observation. A paused observer does not cancel the task.
 - **An attachment is rejected.** Check the opt-in input mode, media type, limits, and HTTP body ceiling. pi-a2a does not truncate oversized files.
+
+## More Pi extensions
+
+Each extension does one job, and all of them share the same conventions for code, tests, and releases. Combine the ones you need:
+
+| Extension                                                     | What it does                                                                              |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| [pi-a2a](https://github.com/leocavalcante/pi-a2a)             | Talk to A2A agents from Pi, and serve Pi Durable agents over the A2A protocol.            |
+| [pi-otel](https://github.com/leocavalcante/pi-otel)           | Observe Pi sessions and Pi Durable agents with OpenTelemetry, exporting metadata only.    |
+| [pi-subagents](https://github.com/leocavalcante/pi-subagents) | Delegate tasks to isolated Pi subagents: single, parallel, chained, or in the background. |
+| [pi-tmux](https://github.com/leocavalcante/pi-tmux)           | Name tmux windows after your current Pi task and mark the ones waiting for your input.    |
+
+Install any of them with `pi install npm:@leocavalcante/<extension>`, then run `/reload`.
 
 ## Contributing
 
