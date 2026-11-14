@@ -284,11 +284,14 @@ Every README uses the same headings in the same order. Optional sections have fi
 ## Privacy and security  what it reads, what leaves your machine, what it writes and where;
                          a link to SECURITY.md
 ## Troubleshooting       optional
+## More Pi extensions    the shared table of extensions, copied verbatim from A.12
 ## Contributing          a link to CONTRIBUTING.md
 ## License               MIT; upstream notices; where the code came from, when relevant
 ```
 
 Never pin a version in an install command, because Pi never updates npm packages installed at a pinned version.
+
+`tests/readme.test.ts` checks that the README opens with the `package.json` description and that "More Pi extensions" matches A.12, so the extensions keep linking to each other.
 
 ## 11. GitHub settings
 
@@ -357,13 +360,14 @@ pi-tmux is the reference implementation; copy the shared files ([A.1](#a1-shared
    3. Set publishing access to "require 2FA and disallow tokens".
    4. Run `npm deprecate @leocavalcante/pi-<name>@0.0.0-stage "Bootstrap placeholder; not a release."`
 6. Merge the first `feat:` PR. `cd.yaml` publishes 0.1.0.
+7. Add the extension to the table in [A.12](#a12-more-pi-extensions), then copy the updated standard and the section into every extension's repository and README.
 
 ## Appendix: reference files
 
 ### A.1 Shared files
 
-- **Identical in every repository:** `.editorconfig`, `.gitattributes`, `.prettierrc.json`, `bunfig.toml`, `eslint.config.mjs`, `.releaserc.json`, `.github/workflows/cd.yaml`, `.github/workflows/pr-title.yaml`, `.github/dependabot.yml`, `.github/pull_request_template.md`, `.github/CODEOWNERS`, `docs/pi-extension-standard.md`.
-- **Identical except for named values:** `tsconfig.json` and `tests/tsconfig.json`, `cliff.toml` (repository URL), `SECURITY.md` (repository name), `AGENTS.md` (project notes), and `.gitignore`.
+- **Identical in every repository:** `.editorconfig`, `.gitattributes`, `.gitignore` ([A.14](#a14-gitignore)), `.prettierrc.json`, `bunfig.toml`, `eslint.config.mjs`, `.releaserc.json`, `.github/workflows/cd.yaml`, `.github/workflows/pr-title.yaml`, `.github/dependabot.yml`, `.github/pull_request_template.md`, `.github/CODEOWNERS`, `docs/pi-extension-standard.md`, and `tests/readme.test.ts`.
+- **Identical except for named values:** `tsconfig.json` and `tests/tsconfig.json`, `cliff.toml` (repository URL), `SECURITY.md` (repository name, [A.13](#a13-securitymd)), and `AGENTS.md` (description and project notes, [A.9](#a9-agentsmd)).
 - **Shared core plus repository-specific jobs:** `.github/workflows/ci.yaml`.
 
 ### A.2 tsconfig.json
@@ -703,21 +707,22 @@ pi-<name>: <description>
 
 ## Commands
 
-- `bun install` installs dependencies.
+- `bun install --frozen-lockfile` installs dependencies.
 - `bun run verify` runs every check CI runs.
 - `bun run test:bun` and `bun run test:node` run one test lane.
+- `bun run format` applies Prettier and ESLint fixes.
 - `pi -e ./src/extension.ts` tries the checkout in Pi.
 
 ## Rules
 
 - Follow docs/pi-extension-standard.md.
-- Write Conventional Commits. The PR title becomes the release note (§10, rule 11).
+- Write Conventional Commits. The PR title becomes the release note (standard §10, rule 11).
 - Sign off every commit (`git commit -s`). Never add Co-Authored-By.
 - Never bump the version, edit CHANGELOG.md, create tags or releases, or publish. cd.yaml does that.
 - Code in src/ runs on Node.js inside Pi: use `node:*` APIs, never Bun APIs.
-- Keep Pi host packages as `"*"` peer dependencies, never dependencies.
+- Keep Pi host packages, such as `@earendil-works/pi-coding-agent` and `typebox`, as `"*"` peer dependencies, never dependencies.
 - Tests make no network or paid model calls.
-- Update README.md and CONTRIBUTING.md with every behavior change, in the voice from §10.
+- Update README.md and CONTRIBUTING.md with every behavior change, in the voice from standard §10.
 
 ## Project notes
 
@@ -796,4 +801,98 @@ gh api -X POST "repos/$R/environments/npm/deployment-branch-policies" -f name=ma
 gh api -X POST "repos/$R/rulesets" --input ruleset-main.json   # once ci.yaml is on main (A.10)
 gh api -X POST "repos/$R/rulesets" --input ruleset-tags.json
 gh api -X PUT "repos/$R/actions/permissions" -F enabled=true -f allowed_actions=all -F sha_pinning_required=true   # once every action is pinned
+```
+
+### A.12 More Pi extensions
+
+Every README carries this section verbatim, between Troubleshooting and Contributing. Each row repeats the extension's `package.json` description.
+
+```markdown
+## More Pi extensions
+
+Each extension does one job, and all of them share the same conventions for code, tests, and releases. Combine the ones you need:
+
+| Extension                                                     | What it does                                                                              |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| [pi-a2a](https://github.com/leocavalcante/pi-a2a)             | Talk to A2A agents from Pi, and serve Pi Durable agents over the A2A protocol.            |
+| [pi-otel](https://github.com/leocavalcante/pi-otel)           | Observe Pi sessions and Pi Durable agents with OpenTelemetry, exporting metadata only.    |
+| [pi-subagents](https://github.com/leocavalcante/pi-subagents) | Delegate tasks to isolated Pi subagents: single, parallel, chained, or in the background. |
+| [pi-tmux](https://github.com/leocavalcante/pi-tmux)           | Name tmux windows after your current Pi task and mark the ones waiting for your input.    |
+
+Install any of them with `pi install npm:@leocavalcante/<extension>`, then run `/reload`.
+```
+
+### A.13 SECURITY.md
+
+```markdown
+# Security policy
+
+## Supported versions
+
+Only the latest release receives security fixes. Upgrade before you report an issue, because older versions may still be affected.
+
+## Report a vulnerability
+
+Report suspected vulnerabilities or accidental credential exposure privately through [GitHub's vulnerability reporting form](https://github.com/leocavalcante/pi-<name>/security/advisories/new). Don't open a public issue, discussion, or pull request for them.
+
+Include:
+
+- the affected pi-<name> version, your Pi and Node.js versions, and your operating system
+- what an attacker can do, and the steps to reproduce it, when it's safe to share them
+
+Do not include credentials, API keys, access tokens, private endpoints, prompts, session data, attachments, logs, or project files. Use synthetic or redacted examples instead.
+
+Please give the maintainer time to investigate and release a fix before you disclose the issue publicly.
+
+## Exposed credentials
+
+If a credential was exposed, revoke or rotate it with its provider first, then report how it was exposed. Never include the credential itself.
+```
+
+### A.14 .gitignore
+
+```gitignore
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+*.tgz
+
+# Generated at release time
+CHANGELOG.md
+
+# Logs and local session records
+*.log
+*.jsonl
+
+# Machine-local state, credentials, and keys
+.env
+.env.*
+!.env.example
+.npmrc
+.netrc
+.pi/
+.pi-durable/
+/auth/
+/data/
+/private/
+/state/
+**/auth.json
+**/credentials*.json
+**/*service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Local databases
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+
+# Operating system files
+.DS_Store
 ```

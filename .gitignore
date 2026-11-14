@@ -1,20 +1,43 @@
+# Dependencies and build output
 node_modules/
 dist/
 coverage/
 *.tgz
+
+# Generated at release time
+CHANGELOG.md
+
+# Logs and local session records
 *.log
+*.jsonl
+
+# Machine-local state, credentials, and keys
 .env
 .env.*
 !.env.example
-/data/
-/state/
+.npmrc
+.netrc
+.pi/
+.pi-durable/
 /auth/
+/data/
 /private/
+/state/
+**/auth.json
+**/credentials*.json
+**/*service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# Local databases
 *.sqlite
 *.sqlite-*
 *.db
 *.db-*
-.pi/
+
+# Operating system files
 .DS_Store
-.npmrc
-CHANGELOG.md
