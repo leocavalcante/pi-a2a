@@ -6,11 +6,14 @@ import {
   fauxAssistantMessage,
   fauxProvider,
   fauxText,
+  type FauxResponseStep,
 } from "@earendil-works/pi-ai";
 import {
   createRegistry,
   Harness,
   MemoryStorage,
+  type Conversation,
+  type ModelRef,
   type Registry,
   type Storage,
 } from "@earendil-works/pi-durable";
@@ -73,13 +76,21 @@ export async function fixture(
     documents?: boolean;
     push?: DurableA2AOptions["push"];
     fileArtifacts?: DurableA2AOptions["fileArtifacts"];
+    responses?: FauxResponseStep[];
+    existingSubmission?: DurableA2AOptions["existingSubmission"];
+    resolver?: (host: {
+      harness: Harness;
+      root: Conversation;
+      model: ModelRef;
+    }) => DurableA2AOptions["conversation"];
   } = {},
 ) {
   const faux = fauxProvider({ tokensPerSecond: options.tokensPerSecond });
   faux.setResponses(
-    (options.answers ?? ["Hello over A2A"]).map((answer) =>
-      fauxAssistantMessage([fauxText(answer)]),
-    ),
+    options.responses ??
+      (options.answers ?? ["Hello over A2A"]).map((answer) =>
+        fauxAssistantMessage([fauxText(answer)]),
+      ),
   );
   const models = createModels();
   models.setProvider(faux.provider);
@@ -99,9 +110,8 @@ export async function fixture(
     context,
   );
   const model = faux.getModel();
-  const root = await harness.root(context, {
-    agent: { model: { provider: model.provider, modelId: model.id } },
-  });
+  const modelRef = { provider: model.provider, modelId: model.id };
+  const root = await harness.root(context, { agent: { model: modelRef } });
   const agentCard = card(
     "http://127.0.0.1:1/a2a",
     options.images,
@@ -112,7 +122,9 @@ export async function fixture(
   const adapter = createDurableA2A({
     harness,
     card: agentCard,
-    conversation: () => root,
+    conversation:
+      options.resolver?.({ harness, root, model: modelRef }) ?? (() => root),
+    existingSubmission: options.existingSubmission,
     mesh: options.mesh,
     whenBusy: options.whenBusy,
     validateInput: options.validateInput,

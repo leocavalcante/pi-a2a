@@ -194,11 +194,23 @@ export interface Identity {
   userId: string;
   tenant: string;
 }
+/** Why the adapter asks for a conversation: `send` admits a message that starts a new A2A context; `adopt` checks an old message ID through `existingSubmission`. */
+export interface ConversationRequest {
+  reason: "send" | "adopt";
+  messageId: string;
+}
 export interface DurableA2AOptions {
   harness: Harness;
   card: AgentCard;
-  /** Resolve a host-owned conversation. Do not return one private conversation for unrelated users. */
-  conversation: (identity: Identity) => Conversation | Promise<Conversation>;
+  /**
+   * Resolve a host-owned conversation. Do not return one private conversation for unrelated users.
+   * Messages in a known context reuse its bound conversation without calling this. A resolver may return a fresh
+   * conversation for each `send`; `adopt` must return the conversation that owns the legacy inputs.
+   */
+  conversation: (
+    identity: Identity,
+    request: ConversationRequest,
+  ) => Conversation | Promise<Conversation>;
   context?: Context;
   /** Owner-message admission only; peers require an idle recipient to avoid mutual-wait deadlocks. */
   whenBusy?: "steer" | "followUp";
@@ -359,7 +371,10 @@ export class DurableA2A implements A2ARequestHandler {
       (await this.options.harness.snapshot(Messages, key, this.context))?.taskId
     )
       return;
-    const conversation = await this.options.conversation(identity);
+    const conversation = await this.options.conversation(identity, {
+      reason: "adopt",
+      messageId: id,
+    });
     const existing = await this.options.existingSubmission(
       id,
       identity,
@@ -814,7 +829,11 @@ export class DurableA2A implements A2ARequestHandler {
       );
       if (!found) throw new TaskNotFoundError();
       conversation = found;
-    } else conversation = await this.options.conversation(identity);
+    } else
+      conversation = await this.options.conversation(identity, {
+        reason: "send",
+        messageId: message.messageId,
+      });
     const documentParts = await Promise.all(
       documents.map(async (document) => ({
         type: "text" as const,
