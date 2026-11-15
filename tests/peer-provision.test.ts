@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { timingSafeEqual } from "node:crypto";
 import {
   mkdtemp,
@@ -18,8 +18,8 @@ import { readAgentConfig } from "../src/config.ts";
 
 // The example protects credentials with POSIX file modes. Windows has no
 // equivalent modes, so the example refuses to run there (tested below).
-const posixOnly =
-  process.platform === "win32" && "requires POSIX file permissions";
+// Windows has no POSIX file permissions.
+const windows = process.platform === "win32";
 
 const equalFiles = async (left: string, right: string) => {
   const a = await readFile(left),
@@ -27,12 +27,11 @@ const equalFiles = async (left: string, right: string) => {
   return a.length === b.length && timingSafeEqual(a, b);
 };
 
-test(
+test.skipIf(windows)(
   "peer provisioning is private, directional, idempotent and additive without rotating existing credentials",
-  { skip: posixOnly },
-  async (t) => {
+  async () => {
     const root = await mkdtemp(join(tmpdir(), "a2a-provision-"));
-    t.after(() => rm(root, { recursive: true }));
+    onTestFinished(() => rm(root, { recursive: true }));
     const directory = join(root, "directory.json"),
       output = join(root, "private");
     const agents: Record<string, { url: string }> = {
@@ -88,12 +87,11 @@ test(
   },
 );
 
-test(
+test.skipIf(windows)(
   "conflicting retained keys, inline credentials, unsafe modes and Git destinations fail without overwriting keys",
-  { skip: posixOnly },
-  async (t) => {
+  async () => {
     const root = await mkdtemp(join(tmpdir(), "a2a-provision-refusal-"));
-    t.after(() => rm(root, { recursive: true }));
+    onTestFinished(() => rm(root, { recursive: true }));
     const directory = join(root, "directory.json"),
       output = join(root, "private");
     const agents = {
@@ -142,12 +140,11 @@ test(
   },
 );
 
-test(
+test.skipIf(!windows)(
   "peer provisioning fails closed where POSIX permissions are unavailable",
-  { skip: process.platform !== "win32" && "Windows-only check" },
-  async (t) => {
+  async () => {
     const root = await mkdtemp(join(tmpdir(), "a2a-provision-"));
-    t.after(() => rm(root, { recursive: true }));
+    onTestFinished(() => rm(root, { recursive: true }));
     const directory = join(root, "directory.json"),
       output = join(root, "private");
     await writeFile(

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { setImmediate as turn } from "node:timers/promises";
 import {
@@ -211,9 +211,9 @@ async function local(
   };
 }
 
-test("TUI admission retains intent/admission and observes with an independent signal", async (t) => {
+test("TUI admission retains intent/admission and observes with an independent signal", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.onConnect(() => {
     assert.ok(
       h.manager
@@ -271,9 +271,9 @@ test("TUI admission retains intent/admission and observes with an independent si
   assert.equal(h.peer.cancellations, 0);
 });
 
-test("reads do not enroll historical tasks or start subscriptions", async (t) => {
+test("reads do not enroll historical tasks or start subscriptions", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.peer.tasks.set(
     "historical",
     task(TaskState.TASK_STATE_COMPLETED, "Retained answer", "historical"),
@@ -295,9 +295,9 @@ test("reads do not enroll historical tasks or start subscriptions", async (t) =>
   assert.equal(h.peer.sent.length, 0);
 });
 
-test("navigation during an uncertain command send cannot append admission or its answer into another history", async (t) => {
+test("navigation during an uncertain command send cannot append admission or its answer into another history", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   const before = h.manager.appendCustomEntry("before-command", {});
   const entered = deferred(),
     release = deferred();
@@ -324,9 +324,9 @@ test("navigation during an uncertain command send cannot append admission or its
   assert.equal(h.widgets.size, 0);
 });
 
-test("observer deduplication binds endpoint, task and message identities, not just the message ID", async (t) => {
+test("observer deduplication binds endpoint, task and message identities, not just the message ID", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.busy(true);
   const first = await h.send("same-message");
   // An explicitly repeated send to a non-idempotent peer can admit a distinct task; never overwrite the first watch.
@@ -359,9 +359,9 @@ test("observer deduplication binds endpoint, task and message identities, not ju
   );
 });
 
-test("repeated registration of the same admitted task reuses its observer and delivery", async (t) => {
+test("repeated registration of the same admitted task reuses its observer and delivery", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   await h.send("idempotent-peer");
   await changedUntil(h.peer.events, () => h.peer.active === 1);
   h.peer.direct = h.peer.tasks.get("task-1");
@@ -376,9 +376,9 @@ test("repeated registration of the same admitted task reuses its observer and de
   assert.equal(h.injections.length, 1);
 });
 
-test("busy Pi retains ready state outside the SDK queue; simultaneous tasks drain serially", async (t) => {
+test("busy Pi retains ready state outside the SDK queue; simultaneous tasks drain serially", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.busy(true);
   await h.send("first");
   await h.send("second");
@@ -412,7 +412,7 @@ test("busy Pi retains ready state outside the SDK queue; simultaneous tasks drai
   assert.equal(h.widgets.size, 0);
 });
 
-test("a queued but unpersisted injection is not acknowledged, and reopening recovers it", async (t) => {
+test("a queued but unpersisted injection is not acknowledged, and reopening recovers it", async () => {
   const h = await local();
   h.persistMessages(false);
   await h.send();
@@ -424,7 +424,7 @@ test("a queued but unpersisted injection is not acknowledged, and reopening reco
   assert.equal(history(h.ctx).delivered.size, 0);
   await h.shutdown();
   const reopened = await local(h.peer, h.manager);
-  t.after(reopened.shutdown);
+  onTestFinished(reopened.shutdown);
   await reopened.wait(() => reopened.injections.length === 1);
   assert.match(
     JSON.stringify(at(reopened.injections, 0).message.content),
@@ -434,7 +434,7 @@ test("a queued but unpersisted injection is not acknowledged, and reopening reco
   assert.equal(h.peer.sent.length, 1);
 });
 
-test("synchronous delivery errors pause once, sanitize diagnostics and retain the ready result for reopen", async (t) => {
+test("synchronous delivery errors pause once, sanitize diagnostics and retain the ready result for reopen", async () => {
   const h = await local();
   h.pi.sendMessage = () => {
     throw new Error("synthetic-private-runtime-diagnostic");
@@ -452,7 +452,7 @@ test("synchronous delivery errors pause once, sanitize diagnostics and retain th
   );
   await h.shutdown();
   const reopened = await local(h.peer, h.manager);
-  t.after(reopened.shutdown);
+  onTestFinished(reopened.shutdown);
   await reopened.wait(() => reopened.injections.length === 1);
   assert.match(
     JSON.stringify(at(reopened.injections, 0).message.content),
@@ -460,21 +460,21 @@ test("synchronous delivery errors pause once, sanitize diagnostics and retain th
   );
 });
 
-test("persisted custom-message acknowledgement suppresses delivery after reopen without a later marker", async (t) => {
+test("persisted custom-message acknowledgement suppresses delivery after reopen without a later marker", async () => {
   const h = await local();
   await h.send();
   h.peer.settle();
   await h.wait(() => history(h.ctx).delivered.size === 1);
   await h.shutdown();
   const reopened = await local(h.peer, h.manager);
-  t.after(reopened.shutdown);
+  onTestFinished(reopened.shutdown);
   await turn();
   await turn();
   assert.equal(reopened.injections.length, 0);
   assert.equal(h.peer.sent.length, 1);
 });
 
-test("legacy, malformed and uncertain intent entries do not enroll arbitrary tasks", async (t) => {
+test("legacy, malformed and uncertain intent entries do not enroll arbitrary tasks", async () => {
   const manager = SessionManager.inMemory();
   manager.appendCustomEntry("pi-a2a.receipt", {
     ...identity,
@@ -494,16 +494,16 @@ test("legacy, malformed and uncertain intent entries do not enroll arbitrary tas
   assert.equal(contextId, "context-1");
   manager.appendCustomEntry(watchKind, { ...intent, phase: "intent" });
   const h = await local(new Peer(), manager);
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   await turn();
   await turn();
   assert.equal(h.peer.reads.length, 0);
   assert.equal(h.injections.length, 0);
 });
 
-test("navigation before the watch excludes stale callbacks; descendant growth and alternate histories remain eligible", async (t) => {
+test("navigation before the watch excludes stale callbacks; descendant growth and alternate histories remain eligible", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   const before = h.manager.appendCustomEntry("before-watch", {});
   await h.send();
   const admissionLeaf = h.manager.getLeafId()!;
@@ -533,9 +533,9 @@ test("navigation before the watch excludes stale callbacks; descendant growth an
   );
 });
 
-test("forked session IDs never inherit parent watch ownership, and compaction retains branch records", async (t) => {
+test("forked session IDs never inherit parent watch ownership, and compaction retains branch records", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.busy(true);
   await h.send();
   h.peer.settle();
@@ -561,7 +561,7 @@ test("forked session IDs never inherit parent watch ownership, and compaction re
     if (entry.type === "custom" && entry.customType === watchKind)
       foreign.appendCustomEntry(watchKind, entry.data);
   const fork = await local(h.peer, foreign);
-  t.after(fork.shutdown);
+  onTestFinished(fork.shutdown);
   await turn();
   await turn();
   assert.equal(fork.injections.length, 0);
@@ -569,14 +569,14 @@ test("forked session IDs never inherit parent watch ownership, and compaction re
   await h.wait(() => h.injections.length === 1);
 });
 
-test("retargeted or removed aliases fail closed before reconnect or delivery", async (t) => {
+test("retargeted or removed aliases fail closed before reconnect or delivery", async () => {
   const targets: AgentConfig[] = [
     { agents: {} },
     { agents: { sample: { url: "https://different.invalid" } } },
   ];
   for (const target of targets) {
     const h = await local();
-    t.after(h.shutdown);
+    onTestFinished(h.shutdown);
     h.busy(true);
     await h.send();
     h.peer.settle();
@@ -596,11 +596,11 @@ test("retargeted or removed aliases fail closed before reconnect or delivery", a
   }
 });
 
-test("unsupported streaming pauses once without inventing task failure or polling", async (t) => {
+test("unsupported streaming pauses once without inventing task failure or polling", async () => {
   const peer = new Peer();
   peer.agentCard.capabilities!.streaming = false;
   const h = await local(peer);
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   const reply = await h.send();
   assert.equal(reply.state, "TASK_STATE_WORKING");
   await h.wait(() => h.notices.length === 1);
@@ -615,7 +615,7 @@ test("unsupported streaming pauses once without inventing task failure or pollin
   assert.equal(peer.cancellations, 0);
 });
 
-test("inline Messages, settled Tasks and explicit foreground waits never enqueue automatic duplicates", async (t) => {
+test("inline Messages, settled Tasks and explicit foreground waits never enqueue automatic duplicates", async () => {
   for (const direct of [
     Message.fromJSON({
       messageId: "direct",
@@ -628,7 +628,7 @@ test("inline Messages, settled Tasks and explicit foreground waits never enqueue
     const peer = new Peer();
     peer.direct = direct;
     const h = await local(peer);
-    t.after(h.shutdown);
+    onTestFinished(h.shutdown);
     const reply = await h.send();
     assert.equal(reply.text, "Inline result");
     assert.equal(reply.watching, false);
@@ -637,7 +637,7 @@ test("inline Messages, settled Tasks and explicit foreground waits never enqueue
     assert.equal(peer.subscriptions.length, 0);
   }
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.peer.read = (id) =>
     task(TaskState.TASK_STATE_COMPLETED, "Foreground result", id);
   assert.equal((await h.send("foreground", true)).text, "Foreground result");
@@ -646,9 +646,9 @@ test("inline Messages, settled Tasks and explicit foreground waits never enqueue
   assert.equal(h.peer.subscriptions.length, 0);
 });
 
-test("an identical send settled inline clears its earlier observer's progress row", async (t) => {
+test("an identical send settled inline clears its earlier observer's progress row", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   await h.send("same-id");
   await changedUntil(h.peer.events, () => h.peer.active === 1);
   h.peer.direct = task(TaskState.TASK_STATE_COMPLETED, "Inline settled result");
@@ -660,10 +660,10 @@ test("an identical send settled inline clears its earlier observer's progress ro
   assert.equal(h.injections.length, 0);
 });
 
-test("print, JSON and RPC retain foreground defaults and false non-TUI watching receipts", async (t) => {
+test("print, JSON and RPC retain foreground defaults and false non-TUI watching receipts", async () => {
   for (const mode of ["print", "json", "rpc"] as const) {
     const h = await local(new Peer(), SessionManager.inMemory(), mode);
-    t.after(h.shutdown);
+    onTestFinished(h.shutdown);
     h.peer.read = (id) =>
       task(TaskState.TASK_STATE_COMPLETED, "Inline mode result", id);
     assert.equal((await h.send(`default-${mode}`)).text, "Inline mode result");
@@ -674,9 +674,9 @@ test("print, JSON and RPC retain foreground defaults and false non-TUI watching 
   }
 });
 
-test("new authorized input rearms an interrupted task with a new message identity", async (t) => {
+test("new authorized input rearms an interrupted task with a new message identity", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   await h.send("first-epoch");
   h.peer.settle(
     "task-1",
@@ -938,9 +938,9 @@ test("shutdown aborts local streams, not remote work, and late callbacks cannot 
   assert.equal(h.widgets.size, 0);
 });
 
-test("nonterminal status events update only the widget, without transcript or follow-up spam", async (t) => {
+test("nonterminal status events update only the widget, without transcript or follow-up spam", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   await h.send();
   await changedUntil(h.peer.events, () => h.peer.active === 1);
   const updated = task(
@@ -975,9 +975,9 @@ test("nonterminal status events update only the widget, without transcript or fo
   await h.wait(() => h.injections.length === 1 && h.widgets.size === 0);
 });
 
-test("a failed or uncertain admission clears its sending widget but retains the original intent", async (t) => {
+test("a failed or uncertain admission clears its sending widget but retains the original intent", async () => {
   const h = await local();
-  t.after(h.shutdown);
+  onTestFinished(h.shutdown);
   h.peer.client.transport.sendMessage = async () => {
     throw new Error("Synthetic uncertain send");
   };

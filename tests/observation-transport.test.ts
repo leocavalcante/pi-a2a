@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { test } from "bun:test";
 import { AgentCard } from "@a2a-js/sdk";
 import { connectAgent, LocalA2AError, safeError } from "../src/client.ts";
 import { card } from "./fixtures/agent.ts";

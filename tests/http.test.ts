@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { createServer, type Server } from "node:http";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
@@ -35,7 +35,7 @@ const close = (server: Server) =>
     });
   });
 
-test("generic client interoperates with an official-SDK server that does not use Pi", async (t) => {
+test("generic client interoperates with an official-SDK server that does not use Pi", async () => {
   const agentCard = card("http://127.0.0.1:1/a2a");
   const handler = new DefaultRequestHandler(
     agentCard,
@@ -64,7 +64,7 @@ test("generic client interoperates with an official-SDK server that does not use
   const server = createA2AServer(handler, {
     allowUnauthenticatedLoopback: true,
   });
-  t.after(() => close(server));
+  onTestFinished(() => close(server));
   const url = await listen(server);
   const supportedInterface = agentCard.supportedInterfaces[0];
   assert(supportedInterface);
@@ -89,19 +89,19 @@ test("local HTTP and credential-bearing URLs are opt-in or rejected", () => {
   assert.equal(endpoint("http://127.0.0.1:8000", true).hostname, "127.0.0.1");
 });
 
-test("Agent Cards cannot redirect traffic or credentials to an unconfigured origin", async (t) => {
+test("Agent Cards cannot redirect traffic or credentials to an unconfigured origin", async () => {
   let foreignCalls = 0;
   const foreign = createServer((_request, response) => {
     foreignCalls++;
     response.end("{}");
   });
-  t.after(() => close(foreign));
+  onTestFinished(() => close(foreign));
   const foreignUrl = await listen(foreign);
   const discovery = createServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify(AgentCard.toJSON(card(`${foreignUrl}/a2a`))));
   });
-  t.after(() => close(discovery));
+  onTestFinished(() => close(discovery));
   const url = await listen(discovery);
   let client;
   try {
@@ -117,19 +117,19 @@ test("Agent Cards cannot redirect traffic or credentials to an unconfigured orig
   assert.equal(foreignCalls, 0);
 });
 
-test("HTTP discovery redirects never forward credentials", async (t) => {
+test("HTTP discovery redirects never forward credentials", async () => {
   let foreignCalls = 0;
   const foreign = createServer((_request, response) => {
     foreignCalls++;
     response.end("{}");
   });
-  t.after(() => close(foreign));
+  onTestFinished(() => close(foreign));
   const destination = await listen(foreign);
   const redirect = createServer((_request, response) => {
     response.writeHead(302, { Location: destination });
     response.end();
   });
-  t.after(() => close(redirect));
+  onTestFinished(() => close(redirect));
   await assert.rejects(
     connectAgent(await listen(redirect), {
       allowHttpLoopback: true,
@@ -139,11 +139,11 @@ test("HTTP discovery redirects never forward credentials", async (t) => {
   assert.equal(foreignCalls, 0);
 });
 
-test("server authentication fails closed by default, including discovery", async (t) => {
+test("server authentication fails closed by default, including discovery", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const server = createA2AServer(f.adapter);
-  t.after(() => close(server));
+  onTestFinished(() => close(server));
   const url = await listen(server);
   assert.equal((await fetch(`${url}/.well-known/agent-card.json`)).status, 401);
   assert.equal(
@@ -153,13 +153,13 @@ test("server authentication fails closed by default, including discovery", async
   assert.equal(f.faux.state.callCount, 0);
 });
 
-test("bearer authentication reads host credentials without putting them in messages", async (t) => {
+test("bearer authentication reads host credentials without putting them in messages", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const server = createA2AServer(f.adapter, {
     authenticate: bearerAuth(() => "synthetic-auth-value", "fixture-owner"),
   });
-  t.after(() => close(server));
+  onTestFinished(() => close(server));
   const url = await listen(server);
   assert.equal((await fetch(`${url}/.well-known/agent-card.json`)).status, 401);
   assert.equal(
@@ -173,9 +173,9 @@ test("bearer authentication reads host credentials without putting them in messa
   assert.equal(f.faux.state.callCount, 0);
 });
 
-test("missing/unsupported protocol versions and oversized bodies fail before admission", async (t) => {
+test("missing/unsupported protocol versions and oversized bodies fail before admission", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const payload = JSON.stringify({
     jsonrpc: "2.0",
     id: 1,
@@ -199,9 +199,9 @@ test("missing/unsupported protocol versions and oversized bodies fail before adm
   assert.equal(f.faux.state.callCount, 0);
 });
 
-test("malformed JSON is a protocol parse error, not a false successful response", async (t) => {
+test("malformed JSON is a protocol parse error, not a false successful response", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const response = await fetch(`${f.baseUrl}/a2a`, {
     method: "POST",
     headers: { "A2A-Version": "1.0" },
@@ -211,12 +211,12 @@ test("malformed JSON is a protocol parse error, not a false successful response"
   assert.equal(document.error.code, -32700);
 });
 
-test("complete JSON responses are byte-bounded and remote diagnostics stay sanitized", async (t) => {
+test("complete JSON responses are byte-bounded and remote diagnostics stay sanitized", async () => {
   const huge = createServer((_request, response) => {
     response.setHeader("Content-Type", "application/json");
     response.end(JSON.stringify({ text: "x".repeat(2 * 1024 * 1024) }));
   });
-  t.after(() => close(huge));
+  onTestFinished(() => close(huge));
   await assert.rejects(
     connectAgent(await listen(huge), { allowHttpLoopback: true }),
     /2 MiB/,

@@ -1,12 +1,12 @@
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import assert from "node:assert/strict";
 import { ServerCallContext } from "@a2a-js/sdk/server";
 import { textRequest } from "../src/client.ts";
 import { fixture } from "./fixtures/agent.ts";
 
-test("direct admission returns detached task metadata, not Chord proxies", async (t) => {
+test("direct admission returns detached task metadata, not Chord proxies", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const context = new ServerCallContext({
     user: { isAuthenticated: true, userName: "loopback-owner" },
     requestedVersion: "1.0",
