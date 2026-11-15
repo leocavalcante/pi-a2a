@@ -6,15 +6,18 @@ import prettier from "eslint-config-prettier/flat";
 import globals from "globals";
 import tseslint from "typescript-eslint";
 
-// Tests inspect dynamically shaped JSON, protocol, and subprocess payloads;
-// keep these relaxations test-only.
+// Tests inspect dynamically shaped JSON, protocol, and subprocess payloads,
+// interpolate them into assertion messages, and save methods they patch so they
+// can restore them; keep these relaxations test-only.
 const testPayloadRules = Object.fromEntries(
   Object.keys(tseslint.plugin.rules)
     .filter(
       (name) =>
         name.startsWith("no-unsafe-") ||
+        name.startsWith("restrict-") ||
         name === "no-explicit-any" ||
-        name === "no-non-null-assertion",
+        name === "no-non-null-assertion" ||
+        name === "unbound-method",
     )
     .map((name) => [`@typescript-eslint/${name}`, "off"]),
 );
@@ -79,9 +82,9 @@ export default defineConfig(
     },
   },
   {
-    // JavaScript subprocess fixtures use no-op callbacks, empty cleanup catches,
-    // computed environment keys, and constant worker loops.
-    files: ["tests/**/*.{js,mjs,cjs}"],
+    // Test doubles and subprocess fixtures use no-op callbacks, empty cleanup
+    // catches, computed environment keys, and constant worker loops.
+    files: ["tests/**/*.{ts,js,mjs,cjs}"],
     rules: {
       "@typescript-eslint/no-empty-function": "off",
       "@typescript-eslint/no-dynamic-delete": "off",
