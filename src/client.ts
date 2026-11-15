@@ -35,7 +35,14 @@ export interface ConnectionOptions {
   allowHttpLoopback?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
-  fetch?: typeof globalThis.fetch;
+  /**
+   * Replaces the global fetch. A call signature rather than `typeof fetch`, which
+   * Bun's types extend with `preconnect`, so any fetch-compatible function works.
+   */
+  fetch?: (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ) => Promise<Response>;
 }
 
 const localErrors = {
@@ -110,7 +117,12 @@ export async function connectAgent(
   const timeoutMs = options.timeoutMs ?? 330_000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1)
     throw new LocalA2AError("INVALID_CONFIGURATION");
-  const guardedFetch: typeof fetch = async (input, init) => {
+  // The SDK types fetchImpl as the global fetch, which Bun's types extend with
+  // `preconnect`; the SDK only calls it.
+  const guardedFetch = (async (
+    input: string | URL | Request,
+    init?: RequestInit,
+  ): Promise<Response> => {
     const url = new URL(
       input instanceof Request ? input.url : input.toString(),
     );
@@ -158,7 +170,7 @@ export async function connectAgent(
       statusText: response.statusText,
       headers: response.headers,
     });
-  };
+  }) as typeof fetch;
   const factory = new ClientFactory({
     transports: [
       new JsonRpcTransportFactory({ fetchImpl: guardedFetch }),
