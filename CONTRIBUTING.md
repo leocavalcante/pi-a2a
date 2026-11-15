@@ -22,7 +22,7 @@ bun run test:node
 pi -e ./src/extension.ts
 ```
 
-- **Bun lane.** `test:bun` builds `dist/` first because the mesh provisioning test runs the published example, which imports it. The tests use the `node:test` API, which Bun runs. Converting them to `bun:test` is follow-up work.
+- **Bun lane.** `test:bun` builds `dist/` first because the mesh provisioning test runs the published example, which imports it.
 - **Node.js lane.** `test:node` covers the extension load test, SIGKILL recovery, and Durable tests that use Pi Durable's `node:sqlite` storage. Bun emulates `node:sqlite`; on macOS, reopening a database fails under that emulation. Production code runs on Node.js. The recovery fixture loads TypeScript through jiti, as Pi does.
 - **No paid model calls.** Tests use synthetic messages, isolated stores, faux providers, and loopback servers.
 - **Skipped tests.** Two tests need the official [A2A CLI](https://github.com/a2aproject/a2a-cli) on `PATH`; without it, they skip.
@@ -41,10 +41,6 @@ uvx --from zizmor==1.32.0 zizmor --offline .github
 ## Pi Durable compatibility
 
 The optional peers `@earendil-works/chord` and `@earendil-works/pi-durable` accept any version, like the other Pi host packages. Chord 1.5.2 removed `Context` and `JsonValue` from its root export, so import Chord types from the `@earendil-works/chord/context` and `@earendil-works/chord/delta` subpaths. Both Chord 1.5.0 and 1.5.2 provide them. CI tests the minimum Pi (1.5.0) and the development dependency version; the weekly Pi canary reports when the latest release diverges.
-
-## Deviations from the standard
-
-- The Bun lane runs tests written against the `node:test` API, which Bun supports. They type-check against Node.js types only (`tests/tsconfig.json`), and `tests/workflows.test.ts` imports `node:test` instead of `bun:test`. Converting them to `bun:test` is follow-up work.
 
 ## Commits and pull requests
 

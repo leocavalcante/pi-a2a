@@ -1,4 +1,4 @@
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import assert from "node:assert/strict";
 import express from "express";
 import { once } from "node:events";
@@ -14,7 +14,7 @@ import { TaskNotCancelableError } from "@a2a-js/sdk/errors";
 import { connectAgent, sendText, textOf } from "../src/client.ts";
 import { card } from "./fixtures/agent.ts";
 
-test("client negotiates an HTTP+JSON/REST-only non-Pi peer", async (t) => {
+test("client negotiates an HTTP+JSON/REST-only non-Pi peer", async () => {
   const agentCard = card("http://127.0.0.1:1/rest");
   const restInterface = agentCard.supportedInterfaces[0];
   assert(restInterface);
@@ -55,7 +55,7 @@ test("client negotiates an HTTP+JSON/REST-only non-Pi peer", async (t) => {
   );
   const server = app.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(
+  onTestFinished(
     () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();

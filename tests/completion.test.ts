@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { EventEmitter } from "node:events";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -171,16 +171,16 @@ const peerOptions = (peer: Peer): ExtensionOptions => ({
   connect: async () => peer.client,
 });
 
-async function directory(t: TestContext) {
+async function directory() {
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-completion-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   return dir;
 }
 
-test("real TUI-bound Pi receives an HTTP/SSE answer and starts one follow-up after its original turn", async (t) => {
+test("real TUI-bound Pi receives an HTTP/SSE answer and starts one follow-up after its original turn", async () => {
   const peer = await httpPeer();
-  t.after(peer.close);
-  const dir = await directory(t);
+  onTestFinished(peer.close);
+  const dir = await directory();
   const s = await sdk(
     dir,
     {
@@ -194,7 +194,7 @@ test("real TUI-bound Pi receives an HTTP/SSE answer and starts one follow-up aft
       say("Automatic remote answer relayed."),
     ],
   );
-  t.after(s.close);
+  onTestFinished(s.close);
   await s.session.prompt("Delegate the supplied synthetic text to sample.");
   assert.equal(
     s.session.getLastAssistantText(),
@@ -229,10 +229,10 @@ test("real TUI-bound Pi receives an HTTP/SSE answer and starts one follow-up aft
   assert.deepEqual(s.errors, []);
 });
 
-test("/a2a returns admission then displays the answer in a fresh Pi session with zero local model calls", async (t) => {
+test("/a2a returns admission then displays the answer in a fresh Pi session with zero local model calls", async () => {
   const peer = await httpPeer();
-  t.after(peer.close);
-  const dir = await directory(t),
+  onTestFinished(peer.close);
+  const dir = await directory(),
     manager = SessionManager.create(dir, join(dir, "sessions"));
   const s = await sdk(
     dir,
@@ -244,7 +244,7 @@ test("/a2a returns admission then displays the answer in a fresh Pi session with
     [],
     manager,
   );
-  t.after(s.close);
+  onTestFinished(s.close);
   await s.session.prompt("/a2a send sample A synthetic command request");
   const receipt = manager
     .getBranch()
@@ -275,8 +275,8 @@ test("/a2a returns admission then displays the answer in a fresh Pi session with
   await assert.rejects(access(manager.getSessionFile()!), { code: "ENOENT" });
 });
 
-test("disk-backed Pi history reopens an admitted task without resubmitting it", async (t) => {
-  const dir = await directory(t),
+test("disk-backed Pi history reopens an admitted task without resubmitting it", async () => {
+  const dir = await directory(),
     manager = SessionManager.create(dir, join(dir, "sessions")),
     peer = new Peer();
   const first = await sdk(
@@ -305,7 +305,7 @@ test("disk-backed Pi history reopens an admitted task without resubmitting it", 
     [say("Restored remote answer")],
     reopenedManager,
   );
-  t.after(reopened.close);
+  onTestFinished(reopened.close);
   await reopened.wait(
     () => reopened.session.getLastAssistantText() === "Restored remote answer",
   );
@@ -323,15 +323,15 @@ test("disk-backed Pi history reopens an admitted task without resubmitting it", 
   assert.deepEqual(reopened.errors, []);
 });
 
-test("real Pi tree navigation excludes abandoned history and restores the selected admission without resending", async (t) => {
-  const dir = await directory(t),
+test("real Pi tree navigation excludes abandoned history and restores the selected admission without resending", async () => {
+  const dir = await directory(),
     peer = new Peer();
   const s = await sdk(dir, peerOptions(peer), [
     send("tree-navigation"),
     say("Accepted"),
     say("Remote response on the original branch"),
   ]);
-  t.after(s.close);
+  onTestFinished(s.close);
   await s.session.prompt("Delegate this synthetic request.");
   await changedUntil(peer.events, () => peer.active === 1);
   const admissionLeaf = s.manager.getLeafId()!;
@@ -367,8 +367,8 @@ test("real Pi tree navigation excludes abandoned history and restores the select
   assert.deepEqual(s.errors, []);
 });
 
-test("completion during unrelated local tool work waits for idle and preserves real Pi message ordering", async (t) => {
-  const dir = await directory(t),
+test("completion during unrelated local tool work waits for idle and preserves real Pi message ordering", async () => {
+  const dir = await directory(),
     peer = new Peer(),
     entered = deferred(),
     release = deferred();
@@ -403,7 +403,7 @@ test("completion during unrelated local tool work waits for idle and preserves r
       });
     },
   );
-  t.after(async () => {
+  onTestFinished(async () => {
     release.resolve();
     await s.close();
   });
@@ -452,8 +452,8 @@ function managerReady(manager: SessionManager) {
     );
 }
 
-test("disk-backed ready event survives an SDK injection lost before persistence, then deduplicates after persistence", async (t) => {
-  const dir = await directory(t),
+test("disk-backed ready event survives an SDK injection lost before persistence, then deduplicates after persistence", async () => {
+  const dir = await directory(),
     manager = SessionManager.create(dir, join(dir, "sessions")),
     peer = new Peer(),
     injected = deferred();
@@ -518,7 +518,7 @@ test("disk-backed ready event survives an SDK injection lost before persistence,
     [],
     SessionManager.open(file),
   );
-  t.after(third.close);
+  onTestFinished(third.close);
   await turn();
   await turn();
   await turn();
@@ -528,7 +528,7 @@ test("disk-backed ready event survives an SDK injection lost before persistence,
   assert.deepEqual(third.errors, []);
 });
 
-test("Durable stages reach a real Pi progress widget over HTTP/SSE without local model calls", async (t) => {
+test("Durable stages reach a real Pi progress widget over HTTP/SSE without local model calls", async () => {
   const registry = createRegistry(),
     entered = deferred(),
     release = deferred();
@@ -550,7 +550,7 @@ test("Durable stages reach a real Pi progress widget over HTTP/SSE without local
     }),
   );
   const f = await fixture({ registry, tokensPerSecond: 60 });
-  t.after(async () => {
+  onTestFinished(async () => {
     release.resolve();
     await f.close();
   });
@@ -560,7 +560,7 @@ test("Durable stages reach a real Pi progress widget over HTTP/SSE without local
       "A synthetic final answer long enough to observe the next generation before this task completes.",
     ),
   ]);
-  const dir = await directory(t);
+  const dir = await directory();
   const s = await sdk(
     dir,
     {
@@ -570,7 +570,7 @@ test("Durable stages reach a real Pi progress widget over HTTP/SSE without local
     },
     [],
   );
-  t.after(s.close);
+  onTestFinished(s.close);
   await s.session.prompt("/a2a send sample A synthetic progress request");
   await entered.promise;
   const display = () => [...s.widgets.values()].flat().join("\n");

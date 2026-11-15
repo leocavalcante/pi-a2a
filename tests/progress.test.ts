@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Message, TaskState, type TaskStatus } from "@a2a-js/sdk";
@@ -58,9 +58,9 @@ function status(
   };
 }
 
-test("progress retains elapsed watching time across admission, animates, and ages only received events", async (t) => {
+test("progress retains elapsed watching time across admission, animates, and ages only received events", async () => {
   const h = display();
-  t.after(() => {
+  onTestFinished(() => {
     h.ui.clear();
   });
   h.ui.update("intent", "dj", undefined, { phase: "sending" });
@@ -89,9 +89,9 @@ test("progress retains elapsed watching time across admission, animates, and age
   assert.match(h.text(), /last event 0s ago/);
 });
 
-test("remote statuses and IDs are bounded, single-line, terminal-safe text; final answers stay out of progress", (t) => {
+test("remote statuses and IDs are bounded, single-line, terminal-safe text; final answers stay out of progress", () => {
   const h = display();
-  t.after(() => {
+  onTestFinished(() => {
     h.ui.clear();
   });
   h.ui.update("task", "dj", "\u001b]52;c;synthetic\u0007", {
@@ -116,9 +116,9 @@ test("remote statuses and IDs are bounded, single-line, terminal-safe text; fina
   assert.match(h.text(), /Response ready; waiting for Pi/);
 });
 
-test("concurrent tasks have independent rows, bounded height, and honest paused/ready states", (t) => {
+test("concurrent tasks have independent rows, bounded height, and honest paused/ready states", () => {
   const h = display();
-  t.after(() => {
+  onTestFinished(() => {
     h.ui.clear();
   });
   for (let i = 0; i < 7; i++)

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
@@ -32,7 +32,7 @@ const lastResult = (messages: TranscriptContext["messages"]) => {
   );
 };
 
-test("a plain A2A client gets a dynamically discovered peer's result without any app-specific protocol", async (t) => {
+test("a plain A2A client gets a dynamically discovered peer's result without any app-specific protocol", async () => {
   const m: Awaited<ReturnType<typeof mesh>> = await mesh({
     targetFileArtifacts: async (task) => [
       Artifact.fromJSON({
@@ -48,7 +48,7 @@ test("a plain A2A client gets a dynamically discovered peer's result without any
       }),
     ],
   });
-  t.after(m.close);
+  onTestFinished(m.close);
   let childId = "";
   m.beta.faux.setResponses([
     (modelContext) => {
@@ -172,9 +172,9 @@ test("a plain A2A client gets a dynamically discovered peer's result without any
   assert.deepEqual(m.beta.reports, []);
 });
 
-test("registration changes become discoverable without changing agent code; paging excludes self", async (t) => {
+test("registration changes become discoverable without changing agent code; paging excludes self", async () => {
   const m = await mesh();
-  t.after(m.close);
+  onTestFinished(m.close);
   m.configs.alpha.agents.alpha = {
     url: m.alpha.baseUrl,
     allowHttpLoopback: true,
@@ -189,7 +189,7 @@ test("registration changes become discoverable without changing agent code; pagi
   );
   assert.equal(first.total, 1);
   const gamma = await fixture({ answers: [] });
-  t.after(gamma.close);
+  onTestFinished(gamma.close);
   gamma.adapter.options.card.name = "gamma";
   m.configs.alpha.agents.gamma = {
     url: gamma.baseUrl,
@@ -214,11 +214,11 @@ test("registration changes become discoverable without changing agent code; pagi
   assert.equal(m.beta.faux.state.callCount, 0);
 });
 
-test("peer identities cannot read owner or other-peer tasks; the human owner can read peer results", async (t) => {
+test("peer identities cannot read owner or other-peer tasks; the human owner can read peer results", async () => {
   const m = await mesh({
     targetAnswers: ["Private owner response", "Alpha peer response"],
   });
-  t.after(m.close);
+  onTestFinished(m.close);
   const owner = await sendText(m.beta.client, "Owner-only synthetic request", {
     messageId: "owner-only",
   });
@@ -265,11 +265,11 @@ test("peer identities cannot read owner or other-peer tasks; the human owner can
   assert.equal(ownerList.totalSize, 2);
 });
 
-test("busy peer rejection is explicit and pre-admission, preserving owner work and allowing a later exact-ID send", async (t) => {
+test("busy peer rejection is explicit and pre-admission, preserving owner work and allowing a later exact-ID send", async () => {
   const m = await mesh();
   const started = deferred(),
     release = deferred();
-  t.after(async () => {
+  onTestFinished(async () => {
     release.resolve();
     await m.close();
   });
@@ -305,13 +305,13 @@ test("busy peer rejection is explicit and pre-admission, preserving owner work a
   assert.equal(m.beta.faux.state.callCount, 2);
 });
 
-test("two occupied peers cannot deadlock by synchronously delegating to each other", async (t) => {
+test("two occupied peers cannot deadlock by synchronously delegating to each other", async () => {
   const m = await mesh();
   const both = deferred(),
     rejections = deferred();
   let started = 0,
     rejected = 0;
-  t.after(async () => {
+  onTestFinished(async () => {
     both.resolve();
     rejections.resolve();
     await m.close();
@@ -360,9 +360,9 @@ test("two occupied peers cannot deadlock by synchronously delegating to each oth
   assert.equal(m.beta.faux.state.callCount, 2);
 });
 
-test("declared peer credentials never become outgoing requests or model-facing discovery data", async (t) => {
+test("declared peer credentials never become outgoing requests or model-facing discovery data", async () => {
   const m = await mesh();
-  t.after(m.close);
+  onTestFinished(m.close);
   await assert.rejects(
     guardPeerData(
       { text: "synthetic-alpha-to-beta-credential" },
@@ -394,9 +394,9 @@ test("declared peer credentials never become outgoing requests or model-facing d
   assert.equal(m.beta.faux.state.callCount, 0);
 });
 
-test("a human client's forged peer metadata cannot spoof authenticated provenance", async (t) => {
+test("a human client's forged peer metadata cannot spoof authenticated provenance", async () => {
   const m = await mesh();
-  t.after(m.close);
+  onTestFinished(m.close);
   m.beta.faux.setResponses([
     (modelContext) => {
       const user = modelContext.messages.findLast(

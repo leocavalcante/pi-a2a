@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { SendMessageRequest } from "@a2a-js/sdk";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { fixture } from "./fixtures/agent.ts";
 import { syntheticPdf } from "./fixtures/pdf.ts";
 
-test("host input guard sees extracted PDF text and rejects before model admission", async (t) => {
+test("host input guard sees extracted PDF text and rejects before model admission", async () => {
   let checked = 0;
   const f = await fixture({
     documents: true,
@@ -15,7 +15,7 @@ test("host input guard sees extracted PDF text and rejects before model admissio
       throw new Error("Synthetic input withheld.");
     },
   });
-  t.after(f.close);
+  onTestFinished(f.close);
   await assert.rejects(
     f.client.sendMessage(
       SendMessageRequest.fromJSON({
@@ -38,7 +38,7 @@ test("host input guard sees extracted PDF text and rejects before model admissio
   assert.equal(f.faux.state.callCount, 0);
 });
 
-test("host input validation cannot rewrite immutable admitted content", async (t) => {
+test("host input validation cannot rewrite immutable admitted content", async () => {
   const f = await fixture({
     documents: true,
     validateInput: (content) => {
@@ -49,7 +49,7 @@ test("host input validation cannot rewrite immutable admitted content", async (t
         });
     },
   });
-  t.after(f.close);
+  onTestFinished(f.close);
   let observed = false;
   f.faux.setResponses([
     (modelContext) => {

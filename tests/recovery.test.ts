@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { createRegistry } from "@earendil-works/pi-durable";
 import {
   fauxAssistantMessage,
@@ -16,9 +16,9 @@ import {
 import { createA2ATools } from "../src/durable.ts";
 import { context, fixture } from "./fixtures/agent.ts";
 
-test("one Durable agent can delegate to another through the public outbound tools", async (t) => {
+test("one Durable agent can delegate to another through the public outbound tools", async () => {
   const target = await fixture({ answers: ["Delegated reply"] });
-  t.after(target.close);
+  onTestFinished(target.close);
   const registry = createRegistry();
   registry.install(
     createA2ATools({
@@ -30,7 +30,7 @@ test("one Durable agent can delegate to another through the public outbound tool
     }),
   );
   const source = await fixture({ registry });
-  t.after(source.close);
+  onTestFinished(source.close);
   source.faux.setResponses([
     fauxAssistantMessage(
       [
@@ -66,9 +66,9 @@ test("one Durable agent can delegate to another through the public outbound tool
   assert.ok(!source.reports.includes("extension_error"));
 });
 
-test("unanswered submissions become failed tasks without forwarding provider diagnostics", async (t) => {
+test("unanswered submissions become failed tasks without forwarding provider diagnostics", async () => {
   const f = await fixture({ answers: [] });
-  t.after(f.close);
+  onTestFinished(f.close);
   const value = await sendText(f.client, "No scripted reply", {
     messageId: "failure-case",
   });
@@ -78,9 +78,9 @@ test("unanswered submissions become failed tasks without forwarding provider dia
   assert.ok(!JSON.stringify(task).includes("No more faux responses"));
 });
 
-test("commentary-only output is not reported as a completed text answer", async (t) => {
+test("commentary-only output is not reported as a completed text answer", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   f.faux.setResponses([
     fauxAssistantMessage([
       {

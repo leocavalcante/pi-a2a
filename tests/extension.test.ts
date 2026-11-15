@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { access, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -54,9 +54,9 @@ function mockPi() {
   return { pi, tools, entries, ctx };
 }
 
-test("Pi tool records message intent before networking and returns schema-valid structured data", async (t) => {
+test("Pi tool records message intent before networking and returns schema-valid structured data", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const { pi, tools, entries, ctx } = mockPi();
   let connects = 0;
   registerA2A(pi, {
@@ -154,9 +154,9 @@ test("listing configured agents performs no discovery or model calls", async () 
   ]);
 });
 
-test("configuration defaults to Pi's a2a directory and honors PI_A2A_CONFIG", async (t) => {
+test("configuration defaults to Pi's a2a directory and honors PI_A2A_CONFIG", async () => {
   const previous = process.env.PI_A2A_CONFIG;
-  t.after(() => {
+  onTestFinished(() => {
     if (previous === undefined) delete process.env.PI_A2A_CONFIG;
     else process.env.PI_A2A_CONFIG = previous;
   });
@@ -167,7 +167,7 @@ test("configuration defaults to Pi's a2a directory and honors PI_A2A_CONFIG", as
   );
 
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-config-path-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   const file = join(dir, "agents.json");
   const config = { agents: { sample: { url: "https://example.invalid" } } };
   await writeFile(file, JSON.stringify(config));
@@ -176,9 +176,9 @@ test("configuration defaults to Pi's a2a directory and honors PI_A2A_CONFIG", as
   assert.deepEqual(await readAgentConfig(), config);
 });
 
-test("configuration permits only explicit targets and environment credential references", async (t) => {
+test("configuration permits only explicit targets and environment credential references", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-config-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   const file = join(dir, "agents.json");
   await assert.rejects(readAgentConfig(file), /Configuration|configuration/);
   await writeFile(
@@ -212,9 +212,9 @@ test("configuration permits only explicit targets and environment credential ref
   await assert.rejects(readAgentConfig(file), /Invalid A2A configuration/);
 });
 
-test("a private credential file authenticates requests without environment export", async (t) => {
+test("a private credential file authenticates requests without environment export", async () => {
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-file-auth-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   const credential = join(dir, "credential");
   await writeFile(credential, "synthetic-file-credential\n", { mode: 0o600 });
   let received = "";
@@ -229,7 +229,7 @@ test("a private credential file authenticates requests without environment expor
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(
+  onTestFinished(
     () =>
       new Promise<void>((resolve) => {
         server.closeAllConnections();
@@ -303,11 +303,11 @@ async function sdkSession(
   return { ...session, faux };
 }
 
-test("a real Pi SDK session executes the extension tool through A2A to Durable", async (t) => {
+test("a real Pi SDK session executes the extension tool through A2A to Durable", async () => {
   const f = await fixture({ answers: ["Durable reply"] });
-  t.after(f.close);
+  onTestFinished(f.close);
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-sdk-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   const { session, faux } = await sdkSession(
     dir,
     (pi) => {
@@ -353,11 +353,11 @@ test("a real Pi SDK session executes the extension tool through A2A to Durable",
   }
 });
 
-test("the /a2a command sends without invoking a Pi-session model", async (t) => {
+test("the /a2a command sends without invoking a Pi-session model", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-command-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   const { session, faux } = await sdkSession(
     dir,
     (pi) => {
@@ -379,11 +379,11 @@ test("the /a2a command sends without invoking a Pi-session model", async (t) => 
   }
 });
 
-test("fresh command-only TUI receipts are not written to disk by Pi 1.5.0", async (t) => {
+test("fresh command-only TUI receipts are not written to disk by Pi 1.5.0", async () => {
   const f = await fixture();
-  t.after(f.close);
+  onTestFinished(f.close);
   const dir = await mkdtemp(join(tmpdir(), "pi-a2a-command-persistence-"));
-  t.after(() => rm(dir, { recursive: true }));
+  onTestFinished(() => rm(dir, { recursive: true }));
   const manager = SessionManager.create(dir, join(dir, "sessions"));
   const file = manager.getSessionFile()!;
   let checkedIntent = false;

@@ -4,20 +4,20 @@ import { promisify } from "node:util";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test from "node:test";
+import { onTestFinished, test } from "bun:test";
 import { waitForTask } from "../src/client.ts";
 import { fixture } from "./fixtures/agent.ts";
 const exec = promisify(execFile);
+// Set A2A_CLI_BIN to run the official CLI integration.
 const cli = process.env.A2A_CLI_BIN;
 
-test(
+test.skipIf(!cli)(
   "official A2A CLI discovers, sends, retrieves and retries a Durable task",
-  { skip: !cli && "Set A2A_CLI_BIN to run the official CLI integration" },
-  async (t) => {
+  async () => {
     const f = await fixture({ answers: ["Official CLI answer"] });
-    t.after(f.close);
+    onTestFinished(f.close);
     const dir = await mkdtemp(join(tmpdir(), "a2a-official-cli-"));
-    t.after(() => rm(dir, { recursive: true }));
+    onTestFinished(() => rm(dir, { recursive: true }));
     const run = (...args: string[]) =>
       exec(
         cli!,
@@ -80,17 +80,16 @@ test(
   },
 );
 
-test(
+test.skipIf(!cli)(
   "official CLI streaming receives committed final text from Durable",
-  { skip: !cli && "Set A2A_CLI_BIN to run the official CLI integration" },
-  async (t) => {
+  async () => {
     const f = await fixture({
       answers: ["Streamed official CLI answer"],
       tokensPerSecond: 100,
     });
-    t.after(f.close);
+    onTestFinished(f.close);
     const dir = await mkdtemp(join(tmpdir(), "a2a-official-stream-"));
-    t.after(() => rm(dir, { recursive: true }));
+    onTestFinished(() => rm(dir, { recursive: true }));
     const output = await exec(
       cli!,
       [

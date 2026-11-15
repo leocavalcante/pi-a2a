@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test } from "bun:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { parse } from "yaml";
@@ -13,6 +13,10 @@ interface Workflow {
       steps?: { uses?: string; run?: string; with?: Record<string, unknown> }[];
     }
   >;
+}
+interface PackageManifest {
+  packageManager: string;
+  trustedDependencies: string[];
 }
 const directory = new URL("../.github/workflows/", import.meta.url);
 
@@ -58,7 +62,7 @@ test("the required check includes every CI job and never hides failed prerequisi
 test("the development toolchain is Bun but runtime sources do not import Bun APIs", () => {
   const manifest = JSON.parse(
     readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-  );
+  ) as PackageManifest;
   assert.match(manifest.packageManager, /^bun@\d+\.\d+\.\d+$/);
   assert.deepEqual(manifest.trustedDependencies, []);
   for (const file of readdirSync(new URL("../src/", import.meta.url)).filter(
