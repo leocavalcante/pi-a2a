@@ -9,13 +9,14 @@ Status: done except gallery media, 2026-11-12. Target: [Pi extension standard v1
 - Step 1 adds Bun, TypeScript 6, and CI. Three findings changed the plan:
   - **Step 3 was dropped, then revived.** `@earendil-works/chord` 1.5.2 removed `JsonValue` and `Context` from its root export. Both versions also export them from the `context` and `delta` subpaths, so importing from there supports 1.5.0 and 1.5.2, and the peers become `*`.
   - The `HeadersInit` type came only from the DOM library that TypeScript added by default. `src/client.ts` now derives the same type from Node's global `Headers`.
-  - The tests use the `node:test` API with `t.after()`. Bun runs them through its `node:test` support, so they type-check against Node types only. Converting them to `bun:test` is follow-up work.
+  - The tests used the `node:test` API with `t.after()`, so they type-checked against Node types only. #21 moved them to `bun:test`, where `onTestFinished` keeps the same cleanup order. It came after #20 (**0.4.5**) typed the client's `fetch` option as a call signature, because Bun's `typeof fetch` also requires `preconnect`.
   - The Durable tests that reopen SQLite through Pi Durable's `node:sqlite` storage fail on macOS under Bun's emulation, with "disk I/O error". In production that code runs on Node.js, so seven files (38 tests) moved to the Node.js lane.
 - Steps 1–2 merged as #1 and #2. The first automated release was 0.4.1 (#3, `docs(readme): install from npm by default`), with provenance.
 - Step 3 merged as #10 and released **0.4.2**: Chord types come from subpaths, the Chord and Pi Durable peers are `*`, and development uses Pi 1.5.2. CI still tests Pi 1.5.0.
 - Steps 4–6 and 8 merged as #7 (Prettier), #9 (`.git-blame-ignore-revs`), and #12 (typescript-eslint `strictTypeChecked` plus `noUncheckedIndexedAccess`, with behavior-preserving fixes only).
 - Step 7 merged as #14 and released **0.4.3**: the README follows the shared structure and voice, and SECURITY, AGENTS, issue forms, the PR template, and CODEOWNERS are in place.
 - Shared conventions synced: #13 (`engines.pi` read by `pi-min`, the test-tools hook, `--if-present` builds, the `release` label for release-failure issues) and #15 (`pi-pins.json` support in `install-pi.ts`).
+- Consistency pass across the four extensions: #18 shared the repository files, #19 (**0.4.4**) linked the other extensions from the README, and #22 shared the test lint relaxations.
 - npm: `0.0.0-stage` is deprecated, and publishing requires 2FA and disallows tokens.
 - **Remaining:** add `pi.image` and upload the matching social preview by hand. Then delete this file.
 
