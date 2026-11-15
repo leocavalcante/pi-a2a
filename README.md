@@ -6,6 +6,8 @@ Talk to A2A agents from Pi, and serve Pi Durable agents over the A2A protocol.
 
 Delegate an authorized request to a configured agent from Pi and inspect its task ID, state, and text. Or expose an existing Pi Durable Harness through A2A 1.0 without opening a second database owner. The Pi extension sends only the request text you choose; it never copies your session transcript automatically.
 
+![pi-a2a preview: Pi lists A2A agents, sends a task to beta, and receives its completed answer](https://raw.githubusercontent.com/leocavalcante/pi-a2a/main/.github/media/preview.png)
+
 ## Contents
 
 - [Installation](#installation)

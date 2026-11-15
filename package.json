@@ -131,6 +131,7 @@
   "pi": {
     "extensions": [
       "./src/extension.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/leocavalcante/pi-a2a/main/.github/media/preview.png"
   }
 }
