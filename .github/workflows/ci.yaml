@@ -33,7 +33,10 @@ jobs:
       - run: bun run check
       - run: bun run --if-present build
       - run: bunx --no-install publint
-      - run: bun audit --audit-level=high
+      # GHSA-fc5q-39xc-vjpf (picomatch ReDoS) has no patched release. Only dev
+      # tooling uses picomatch; no runtime dependency of the published package uses it.
+      # Remove the ignore once a fixed picomatch version ships.
+      - run: bun audit --audit-level=high --ignore=GHSA-fc5q-39xc-vjpf
       - run: bash .github/scripts/check-workflows.sh
       - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:

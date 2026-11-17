@@ -62,7 +62,7 @@
     "test:node": "node --import jiti/register --test --test-timeout=30000 --test-concurrency=1 tests/*.node-test.ts",
     "changelog": "git-cliff --output CHANGELOG.md",
     "check:package": "bun run build && bun run changelog && publint && node .github/scripts/check-package.mjs",
-    "verify": "bun run lint && bun run check && bun run test && bun run check:package && bun audit --audit-level=high",
+    "verify": "bun run lint && bun run check && bun run test && bun run check:package && bun audit --audit-level=high --ignore=GHSA-fc5q-39xc-vjpf",
     "example": "node --import jiti/register examples/echo.ts",
     "prepack": "bun run build"
   },
