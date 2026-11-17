@@ -13,7 +13,7 @@ git diff --check
 `verify` checks formatting and lint, then type-checks the source, tests, examples, and CI scripts. It runs the Bun and Node.js test lanes, builds the package, validates it in an isolated consumer, checks package metadata, and audits dependencies.
 
 - `bun run lint` runs Prettier and ESLint with typescript-eslint `strictTypeChecked`; `bun run format` applies their fixes. Disable a rule only on the line that needs it, with a reason. Tests may relax unsafe-any, explicit-`any`, non-null-assertion, and `require-await` rules because they inspect untyped protocol payloads and use Promise-shaped test doubles.
-- Audits block high and critical vulnerabilities. Run `bun audit` to review every severity.
+- Audits block high and critical vulnerabilities. Run `bun audit` to review every severity. The audit ignores [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf), a picomatch ReDoS with no patched release. Only development tooling, such as semantic-release and typescript-eslint, uses picomatch; no runtime dependency of the published package does. Remove the ignore from `verify` and CI once a fixed version ships.
 - `bun run check` type-checks source, tests, examples, and CI scripts. `bun run check:package` builds, updates the ignored changelog, checks package metadata, and tests the package contents.
 
 ```sh
